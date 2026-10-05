@@ -22,7 +22,7 @@ Keys live in `~/.config/boomer/` with strict perms. Env overrides: `BOOMER_VT_AP
 
 ```sh
 boomer -a target.com     # subdomains from 10+ passive sources
-boomer -b <url|file>     # endpoint discovery
+boomer -b <url|file> [extra endpoint-finder args...]  # endpoint discovery
 boomer -c|-d <file>      # sort live hosts by status code
 boomer -e <httpx-file>   # split httpx output per status code
 boomer -f <httpx-file>   # same, URL only

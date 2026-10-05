@@ -53,14 +53,14 @@ boomer_save_key() {
 usage() {
     echo "Usage: $0 [options]
     -a        AllDomz
-    -b        AllUrls
+    -b        EndpointFinder <url|file> [extra endpoint-finder args...]
     -c        Domains to status codes
     -d        Domains to status codes [Simple]
     -e        HTTPX To Specific Status Code Text File
     -f        HTTPX To Specific Status Code Text File [Simple]
     -g        Alien Url's
     -h        Virus Total
-    -i        TechDetect
+    -i        TechDetect <url|file> [extra techdetect args...]
     -s        Save API key permanently (-s <VT-key> or -s st:<SecurityTrails-key>)"
     exit 1
 }
@@ -459,14 +459,17 @@ main() {
     while getopts ":a:b:c:d:e:f:g:h:i:s:" opt; do
         case $opt in
             a) AllDomz "$OPTARG" ;;
-            b) EndpointFinder "$OPTARG" ;;
+            # -b consumes the rest of the command line: input + verbatim
+            # endpoint-finder args (getopts would otherwise reject them).
+            b) EndpointFinder "$OPTARG" "${@:OPTIND}"; break ;;
             c) CleanDomains "$OPTARG" ;;
             d) CleanDomains_Simple "$OPTARG" ;;
             e) httpx_status_code "$OPTARG" ;;
             f) httpx_status_code_simple "$OPTARG" ;;
             g) AlienUrl "$OPTARG" ;;
             h) VirusTotal "$OPTARG" ;;
-            i) TechDetect "$OPTARG" ;;
+            # same verbatim-forwarding as -b.
+            i) TechDetect "$OPTARG" "${@:OPTIND}"; break ;;
             s) boomer_save_key "$OPTARG" ;;
             *) usage ;;
         esac
