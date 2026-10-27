@@ -3,6 +3,9 @@
 BOOMER_CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/boomer"
 BOOMER_VT_KEY_FILE="$BOOMER_CONFIG_DIR/vt_api_key"
 BOOMER_ST_KEY_FILE="$BOOMER_CONFIG_DIR/securitytrails_key"
+BOOMER_OTX_KEY_FILE="$BOOMER_CONFIG_DIR/otx_api_key"
+BOOMER_BUILTIN_VT_KEY=''
+BOOMER_BUILTIN_ST_KEY=''
 
 boomer_config_dir() {
     mkdir -p "$BOOMER_CONFIG_DIR" 2>/dev/null && chmod 700 "$BOOMER_CONFIG_DIR" 2>/dev/null
@@ -10,22 +13,43 @@ boomer_config_dir() {
 
 boomer_vt_key() {
     if [[ -n "${BOOMER_VT_API_KEY:-}" ]]; then
-        echo "$BOOMER_VT_API_KEY"
+        printf '%s\n' "$BOOMER_VT_API_KEY"
         return 0
     fi
     if [[ -f "$BOOMER_VT_KEY_FILE" ]]; then
-        tr -d ' \t\r\n' < "$BOOMER_VT_KEY_FILE"
+        local saved
+        saved="$(tr -d ' \t\r\n' < "$BOOMER_VT_KEY_FILE")"
+        if [[ -n "$saved" ]]; then
+            printf '%s\n' "$saved"
+            return 0
+        fi
     fi
-    return 0
+    printf '%s\n' "$BOOMER_BUILTIN_VT_KEY"
 }
 
 boomer_st_key() {
     if [[ -n "${BOOMER_SECURITYTRAILS_KEY:-}" ]]; then
-        echo "$BOOMER_SECURITYTRAILS_KEY"
+        printf '%s\n' "$BOOMER_SECURITYTRAILS_KEY"
         return 0
     fi
     if [[ -f "$BOOMER_ST_KEY_FILE" ]]; then
-        tr -d ' \t\r\n' < "$BOOMER_ST_KEY_FILE"
+        local saved
+        saved="$(tr -d ' \t\r\n' < "$BOOMER_ST_KEY_FILE")"
+        if [[ -n "$saved" ]]; then
+            printf '%s\n' "$saved"
+            return 0
+        fi
+    fi
+    printf '%s\n' "$BOOMER_BUILTIN_ST_KEY"
+}
+
+boomer_otx_key() {
+    if [[ -n "${BOOMER_OTX_API_KEY:-}" ]]; then
+        printf '%s\n' "$BOOMER_OTX_API_KEY"
+        return 0
+    fi
+    if [[ -f "$BOOMER_OTX_KEY_FILE" ]]; then
+        tr -d ' \t\r\n' < "$BOOMER_OTX_KEY_FILE"
     fi
     return 0
 }
@@ -38,16 +62,88 @@ boomer_save_key() {
         target="$BOOMER_ST_KEY_FILE"
         label="SecurityTrails"
         spec="${spec#st:}"
+    elif [[ "$spec" == otx:* ]]; then
+        target="$BOOMER_OTX_KEY_FILE"
+        label="AlienVault OTX"
+        spec="${spec#otx:}"
     fi
-    spec="$(echo "$spec" | tr -d ' \t\r\n')"
+    spec="$(printf '%s' "$spec" | tr -d ' \t\r\n')"
     if [[ -z "$spec" ]]; then
-        echo "Usage: $0 -s <VirusTotal-API-key>  (or  $0 -s st:<SecurityTrails-key>)" >&2
+        echo "Usage: $0 -s <VirusTotal-API-key>  (or  $0 -s st:<SecurityTrails-key> | otx:<OTX-key>)" >&2
         return 1
     fi
-    boomer_config_dir
-    printf '%s' "$spec" > "$target"
-    chmod 600 "$target"
+    if ! boomer_config_dir; then
+        echo "[ERROR] could not create $BOOMER_CONFIG_DIR" >&2
+        return 1
+    fi
+    if ! (umask 077; printf '%s' "$spec" > "$target"); then
+        echo "[ERROR] could not write $target" >&2
+        return 1
+    fi
+    if ! chmod 600 "$target" 2>/dev/null; then
+        echo "[ERROR] could not secure $target" >&2
+        return 1
+    fi
     echo "[INFO] $label API key saved to $target (reused automatically)"
+}
+
+boomer_normalize_domain() {
+    local raw="$1"
+    raw="${raw%$'\r'}"
+    raw="${raw#"${raw%%[![:space:]]*}"}"
+    raw="${raw%"${raw##*[![:space:]]}"}"
+    [[ -z "$raw" || "$raw" == \#* ]] && return 1
+    raw="${raw#*://}"
+    raw="${raw#//}"
+    raw="${raw%%/*}"
+    raw="${raw%%\?*}"
+    raw="${raw%%#*}"
+    raw="${raw##*@}"
+    raw="${raw%%:*}"
+    raw="${raw%.}"
+    raw="${raw#\*.}"
+    raw="${raw#"${raw%%[![:space:]]*}"}"
+    raw="${raw%"${raw##*[![:space:]]}"}"
+    [[ -z "$raw" || ${#raw} -gt 253 ]] && return 1
+    [[ "$raw" =~ ^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)+$ ]] || return 1
+    BOOMER_NORMALIZED="$raw"
+    return 0
+}
+
+boomer_load_targets() {
+    local input="$1"
+    local dest="$2"
+    local line line_trim lowered invalid=0
+    local norm_lines
+    norm_lines=()
+    if [[ -f "$input" ]]; then
+        while IFS= read -r line || [[ -n "$line" ]]; do
+            line="${line%$'\r'}"
+            line_trim="${line#"${line%%[![:space:]]*}"}"
+            line_trim="${line_trim%"${line_trim##*[![:space:]]}"}"
+            [[ -z "$line_trim" || "$line_trim" == \#* ]] && continue
+            if boomer_normalize_domain "$line"; then
+                norm_lines+=("$BOOMER_NORMALIZED")
+            else
+                invalid=$((invalid + 1))
+            fi
+        done < <(LC_ALL=C tr '[:upper:]' '[:lower:]' < "$input")
+        (( invalid > 0 )) && echo "[WARN] skipped $invalid invalid scope line(s) from $input" >&2
+    else
+        lowered="$(printf '%s' "$input" | LC_ALL=C tr '[:upper:]' '[:lower:]')"
+        boomer_normalize_domain "$lowered" || return 1
+        norm_lines+=("$BOOMER_NORMALIZED")
+    fi
+    (( ${#norm_lines[@]} > 0 )) || return 1
+    if ! printf '%s\n' "${norm_lines[@]}" > "$dest"; then
+        echo "[ERROR] could not write $dest" >&2
+        return 1
+    fi
+    if ! LC_ALL=C sort -u -o "$dest" "$dest"; then
+        echo "[ERROR] could not dedupe targets" >&2
+        return 1
+    fi
+    return 0
 }
 
 usage() {
@@ -60,8 +156,7 @@ usage() {
     -f        HTTPX To Specific Status Code Text File [Simple]
     -g        Alien Url's
     -h        Virus Total
-    -i        TechDetect <url|file> [extra techdetect args...]
-    -s        Save API key permanently (-s <VT-key> or -s st:<SecurityTrails-key>)"
+    -i        TechDetect <url|file> [extra techdetect args...]"
     exit 1
 }
 
@@ -98,43 +193,147 @@ httpx_status_code_simple() {
 }
 
 AlienUrl() {
-    local domain=$1
-    if [[ -z "$domain" ]]; then
-        echo "Usage: $0 -g <domain>" >&2
+    local input=$1
+    if [[ -z "$input" ]]; then
+        echo "Usage: $0 -g <domain|url|file>" >&2
         return 1
     fi
     if ! command -v jq >/dev/null 2>&1; then
         echo "[ERROR] jq not found on PATH" >&2
         return 1
     fi
-    local output_file="AlienResult.txt"
-    local base_url="https://otx.alienvault.com/api/v1/indicators/domain/$domain/url_list?limit=500&page="
-    local page=1
-    local max_pages=20
-
-    echo "[INFO] Scraping URLs for domain: $domain"
-
-    while (( page <= max_pages )); do
-        if ! response=$(curl -s --max-time 60 "$base_url$page"); then
-            echo "[ERROR] request failed for page $page" >&2
-            break
-        fi
-        urls=$(echo "$response" | jq -r '.url_list[].url' 2>/dev/null)
-
-        if [ -z "$urls" ]; then
-            echo "[INFO] No more URLs for $domain."
-            break
-        fi
-
-        echo "$urls" >>"$output_file"
-        page=$((page + 1))
-    done
-
-    if [ -s "$output_file" ]; then
-        echo "[INFO] URLs saved to $output_file"
-    else
-        echo "[INFO] No URLs found for domain: $domain."
+    if ! command -v curl >/dev/null 2>&1; then
+        echo "[ERROR] curl not found on PATH" >&2
+        return 1
     fi
+
+    local output_file="AlienResult.txt"
+    local tmp_targets tmp_urls
+    tmp_targets="$(mktemp "${TMPDIR:-/tmp}/boomer-otx-targets.XXXXXX")" || {
+        echo "[ERROR] could not create temporary file" >&2
+        return 1
+    }
+    tmp_urls="$(mktemp "${TMPDIR:-/tmp}/boomer-otx.XXXXXX")" || {
+        echo "[ERROR] could not create temporary file" >&2
+        rm -f "$tmp_targets"
+        return 1
+    }
+    if ! boomer_load_targets "$input" "$tmp_targets"; then
+        echo "[ERROR] no valid domain/URL targets in: $input" >&2
+        rm -f "$tmp_targets" "$tmp_urls"
+        return 1
+    fi
+
+    local api_key auth_args otx_delay otx_backoff
+    api_key="$(boomer_otx_key)"
+    auth_args=()
+    if [[ -n "$api_key" ]]; then
+        auth_args=(-H "X-OTX-API-KEY: $api_key")
+        otx_delay="${BOOMER_OTX_DELAY:-1}"
+    else
+        otx_delay="${BOOMER_OTX_DELAY:-4}"
+    fi
+    otx_backoff="${BOOMER_OTX_BACKOFF:-60}"
+    if [[ ! "$otx_delay" =~ ^[0-9]+([.][0-9]+)?$ ]]; then
+        if [[ -n "$api_key" ]]; then otx_delay=1; else otx_delay=4; fi
+    fi
+    [[ "$otx_backoff" =~ ^[0-9]+([.][0-9]+)?$ ]] || otx_backoff=60
+
+    local target base_url page max_pages response body http_code urls has_next err
+    local requests=0 retries rc=0
+    while IFS= read -r target; do
+        echo "[INFO] Scraping URLs for domain: $target"
+        base_url="https://otx.alienvault.com/api/v1/indicators/domain/$target/url_list?limit=500&page="
+        page=1
+        max_pages=20
+        retries=0
+        while (( page <= max_pages )); do
+            if (( requests > 0 )); then
+                sleep "$otx_delay"
+            fi
+            requests=$((requests + 1))
+            if ! response=$(curl -s --max-time 60 -w $'\n%{http_code}' "${auth_args[@]}" "$base_url$page"); then
+                echo "[ERROR] request failed for $target page $page" >&2
+                rc=1
+                break
+            fi
+            http_code="${response##*$'\n'}"
+            body="${response%$'\n'*}"
+            if [[ "$http_code" == "429" ]]; then
+                if (( retries >= 1 )); then
+                    echo "[ERROR] OTX rate limit still active for $target; stopping remaining targets." >&2
+                    rc=1
+                    break 2
+                fi
+                retries=$((retries + 1))
+                echo "[WARN] OTX rate limit hit, waiting ${otx_backoff}s..." >&2
+                sleep "$otx_backoff"
+                continue
+            fi
+            if [[ "$http_code" == "404" ]]; then
+                echo "[INFO] No OTX data for $target (HTTP 404)."
+                break
+            fi
+            if [[ "$http_code" == "401" || "$http_code" == "403" ]]; then
+                echo "[ERROR] OTX rejected the API key or access (HTTP $http_code); stopping remaining targets." >&2
+                rc=1
+                break 2
+            fi
+            if [[ "$http_code" =~ ^[0-9]+$ ]] && (( http_code >= 400 )); then
+                echo "[ERROR] OTX returned HTTP $http_code for $target page $page" >&2
+                rc=1
+                break
+            fi
+            urls="$(printf '%s' "$body" | jq -r '.url_list[]?.url // empty | select(length > 0)' 2>/dev/null)"
+            if [[ -z "$urls" ]]; then
+                if ! printf '%s' "$body" | jq -e . >/dev/null 2>&1; then
+                    echo "[WARN] invalid OTX response for $target page $page" >&2
+                    rc=1
+                    break
+                fi
+                err="$(printf '%s' "$body" | jq -r '.detail // .error // empty' 2>/dev/null)"
+                if [[ -n "$err" ]]; then
+                    echo "[WARN] OTX error for $target page $page: $err" >&2
+                    rc=1
+                else
+                    echo "[INFO] No more URLs for $target."
+                fi
+                break
+            fi
+            printf '%s\n' "$urls" >> "$tmp_urls"
+            has_next="$(printf '%s' "$body" | jq -r 'if .has_next == false then "false" else "true" end' 2>/dev/null)"
+            if [[ "$has_next" == "false" ]]; then
+                break
+            fi
+            page=$((page + 1))
+        done
+    done < "$tmp_targets"
+
+    if [[ -s "$tmp_urls" ]]; then
+        LC_ALL=C sort -u -o "$tmp_urls" "$tmp_urls"
+        if [[ -e "$output_file" && ! -f "$output_file" ]]; then
+            echo "[ERROR] output path is not a regular file: $output_file" >&2
+            rc=1
+        elif [[ -f "$output_file" ]]; then
+            if awk 'NR==FNR { seen[$0]=1; next } !seen[$0]++' "$output_file" "$tmp_urls" >> "$output_file"; then
+                echo "[INFO] URLs appended to $output_file"
+            else
+                echo "[ERROR] could not append to $output_file" >&2
+                rc=1
+            fi
+        else
+            if cp "$tmp_urls" "$output_file"; then
+                echo "[INFO] URLs appended to $output_file"
+            else
+                echo "[ERROR] could not write $output_file" >&2
+                rc=1
+            fi
+        fi
+    else
+        echo "[INFO] No AlienVault URLs found; no output file created."
+    fi
+    rm -f "$tmp_targets" "$tmp_urls"
+    return "$rc"
 }
 
 VirusTotal() {
@@ -142,11 +341,15 @@ VirusTotal() {
     local api_key
 
     if [[ -z "$input" ]]; then
-        echo "Usage: $0 -h <domain|file>" >&2
+        echo "Usage: $0 -h <domain|url|file>" >&2
         return 1
     fi
     if ! command -v jq >/dev/null 2>&1; then
         echo "[ERROR] jq not found on PATH" >&2
+        return 1
+    fi
+    if ! command -v curl >/dev/null 2>&1; then
+        echo "[ERROR] curl not found on PATH" >&2
         return 1
     fi
 
@@ -166,76 +369,142 @@ VirusTotal() {
         fi
     fi
 
-    local targets=()
-    local out=""
-    if [[ -f "$input" ]]; then
-        echo "[INFO] Detected file input: $input"
-        local base="$(basename "$input")"
-        base="${base%.*}"
-        [[ -z "$base" ]] && base="targets"
-        out="${base}-virustotal.txt"
-        while IFS= read -r line || [[ -n "$line" ]]; do
-            line="${line%$'\r'}"
-            line="$(echo "$line" | xargs)"
-            [[ -z "$line" || "$line" == \#* ]] && continue
-            targets+=("$line")
-        done < "$input"
-    else
-        echo "[INFO] Detected URL/host input: $input"
-        local safe="$input"
-        safe="${safe#https://}"
-        safe="${safe#http://}"
-        safe="${safe%%/*}"
-        safe="${safe//[^A-Za-z0-9.-]/_}"
-        [[ -z "$safe" ]] && safe="target"
-        out="$safe-virustotal.txt"
-        targets=("$input")
-    fi
-    if [[ ${#targets[@]} -eq 0 ]]; then
-        echo "[ERROR] no valid targets" >&2
+    local out="VirusTotalResult.txt"
+    local tmp_targets tmp_out
+    tmp_targets="$(mktemp "${TMPDIR:-/tmp}/boomer-vt-targets.XXXXXX")" || {
+        echo "[ERROR] could not create temporary file" >&2
+        return 1
+    }
+    if ! boomer_load_targets "$input" "$tmp_targets"; then
+        echo "[ERROR] no valid domain/URL targets in: $input" >&2
+        rm -f "$tmp_targets"
         return 1
     fi
-    : > "$out"
+    tmp_out="$(mktemp "${TMPDIR:-/tmp}/boomer-vt.XXXXXX")" || {
+        echo "[ERROR] could not create temporary file" >&2
+        rm -f "$tmp_targets"
+        return 1
+    }
 
-    local domain URL response undetected_urls code
-    for domain in "${targets[@]}"; do
-        domain="${domain#https://}"
-        domain="${domain#http://}"
-        domain="${domain%%/*}"
-        domain="${domain%%:*}"
+    local vt_delay="${BOOMER_VT_DELAY:-15}"
+    local vt_backoff="${BOOMER_VT_BACKOFF:-60}"
+    local vt_retries="${BOOMER_VT_RETRIES:-1}"
+    [[ "$vt_delay" =~ ^[0-9]+([.][0-9]+)?$ ]] || vt_delay=15
+    [[ "$vt_backoff" =~ ^[0-9]+([.][0-9]+)?$ ]] || vt_backoff=60
+    [[ "$vt_retries" =~ ^[0-9]+$ ]] || vt_retries=1
+
+    local domain URL response body http_code undetected_urls code
+    local requests=0 rc=0 fail_streak=0 empty_streak=0
+    local attempt fetch_failed
+    while IFS= read -r domain; do
+        if (( requests > 0 )); then
+            echo "[INFO] VirusTotal rate limit: waiting ${vt_delay}s before next request..."
+            sleep "$vt_delay"
+        fi
+        requests=$((requests + 1))
+
         URL="https://www.virustotal.com/vtapi/v2/domain/report?apikey=$api_key&domain=$domain"
+        echo -e "\nFetching data for domain: \033[1;34m$domain\033[0m (using configured API key)"
 
-        echo -e "\nFetching data for domain: \033[1;34m$domain\033[0m (using saved API key)"
-        echo "Domain: $domain" >> "$out"
-        if ! response=$(curl -s --max-time 60 "$URL"); then
+        attempt=0
+        fetch_failed=0
+        body=""
+        http_code=""
+        while :; do
+            if ! response=$(curl -s --max-time 60 -w $'\n%{http_code}' "$URL"); then
+                fetch_failed=1
+                break
+            fi
+            http_code="${response##*$'\n'}"
+            body="${response%$'\n'*}"
+            if [[ "$http_code" == "204" || "$http_code" == "429" ]]; then
+                if (( attempt >= vt_retries )); then
+                    echo "[ERROR] VirusTotal rate limit/quota exhausted (HTTP $http_code) for $domain; stopping remaining targets." >&2
+                    rc=1
+                    break 2
+                fi
+                attempt=$((attempt + 1))
+                echo "[WARN] VirusTotal rate limit/quota hit (HTTP $http_code); waiting ${vt_backoff}s before retry..." >&2
+                sleep "$vt_backoff"
+                continue
+            fi
+            break
+        done
+
+        if (( fetch_failed )); then
             echo -e "\033[1;31mError fetching data for domain: $domain\033[0m"
-            echo "ERROR fetching data" >> "$out"
-            echo "------------------------------------------" >> "$out"
+            rc=1
+            fail_streak=$((fail_streak + 1))
+            if (( fail_streak >= 2 )); then
+                echo "[ERROR] repeated network failures; stopping remaining targets." >&2
+                break
+            fi
             continue
         fi
+        fail_streak=0
 
-        code=$(echo "$response" | jq -r '.response_code // empty' 2>/dev/null)
+        if [[ "$http_code" == "401" || "$http_code" == "403" ]]; then
+            echo "[ERROR] VirusTotal rejected the API key or access (HTTP $http_code) for $domain; stopping remaining targets." >&2
+            rc=1
+            break
+        fi
+        if [[ "$http_code" =~ ^[0-9]+$ ]] && (( http_code >= 400 )); then
+            echo "[WARN] VirusTotal returned HTTP $http_code for $domain" >&2
+            rc=1
+            continue
+        fi
+        if [[ -z "$body" ]]; then
+            echo -e "\033[1;31mEmpty response for domain: $domain (rate limit/quota?)\033[0m"
+            rc=1
+            empty_streak=$((empty_streak + 1))
+            if (( empty_streak >= 2 )); then
+                echo "[ERROR] repeated empty responses; stopping remaining targets." >&2
+                break
+            fi
+            continue
+        fi
+        empty_streak=0
+
+        code="$(printf '%s' "$body" | jq -r '.response_code // empty' 2>/dev/null)"
+        if [[ -z "$code" ]]; then
+            echo "[WARN] Unexpected VirusTotal response for $domain" >&2
+            rc=1
+            continue
+        fi
         if [[ "$code" == "0" ]]; then
             echo -e "\033[1;33mDomain not found in VirusTotal: $domain\033[0m"
-            echo "Not found in VirusTotal" >> "$out"
         elif [[ "$code" == "-2" ]]; then
             echo -e "\033[1;33mAnalysis queued in VirusTotal: $domain\033[0m"
-            echo "Analysis queued" >> "$out"
         else
-            undetected_urls=$(echo "$response" | jq -r '.undetected_urls[][0]' 2>/dev/null)
+            undetected_urls="$(printf '%s' "$body" | jq -r '.undetected_urls[]? | .[0] // empty | select(length > 0)' 2>/dev/null)"
             if [[ -z "$undetected_urls" ]]; then
                 echo -e "\033[1;33mNo undetected URLs found for domain: $domain\033[0m"
-                echo "No undetected URLs found" >> "$out"
             else
                 echo -e "\033[1;32mUndetected URLs for domain: $domain\033[0m"
                 echo "$undetected_urls"
-                echo "Undetected URLs:" >> "$out"
-                echo "$undetected_urls" >> "$out"
+                echo "Domain: $domain" >> "$tmp_out"
+                echo "Undetected URLs:" >> "$tmp_out"
+                echo "$undetected_urls" >> "$tmp_out"
+                echo "------------------------------------------" >> "$tmp_out"
             fi
         fi
-        echo "------------------------------------------" >> "$out"
-    done
-    echo "[INFO] Results saved to $out"
+    done < "$tmp_targets"
+
+    if [[ -s "$tmp_out" ]]; then
+        if [[ -e "$out" && ! -f "$out" ]]; then
+            echo "[ERROR] output path is not a regular file: $out" >&2
+            rc=1
+        elif cat "$tmp_out" >> "$out"; then
+            echo "[INFO] Results appended to $out"
+        else
+            echo "[ERROR] could not write to $out" >&2
+            rc=1
+        fi
+    else
+        echo "[INFO] No VirusTotal data found; no output file created."
+    fi
+    rm -f "$tmp_targets" "$tmp_out"
+    return "$rc"
 }
 
 AllDomz() {
@@ -456,21 +725,22 @@ TechDetect() {
 }
 
 main() {
+    local rc=0
     while getopts ":a:b:c:d:e:f:g:h:i:s:" opt; do
         case $opt in
-            a) AllDomz "$OPTARG" ;;
+            a) AllDomz "$OPTARG" || rc=$? ;;
             # -b consumes the rest of the command line: input + verbatim
             # endpoint-finder args (getopts would otherwise reject them).
-            b) EndpointFinder "$OPTARG" "${@:OPTIND}"; break ;;
-            c) CleanDomains "$OPTARG" ;;
-            d) CleanDomains_Simple "$OPTARG" ;;
-            e) httpx_status_code "$OPTARG" ;;
-            f) httpx_status_code_simple "$OPTARG" ;;
-            g) AlienUrl "$OPTARG" ;;
-            h) VirusTotal "$OPTARG" ;;
+            b) EndpointFinder "$OPTARG" "${@:OPTIND}" || rc=$?; break ;;
+            c) CleanDomains "$OPTARG" || rc=$? ;;
+            d) CleanDomains_Simple "$OPTARG" || rc=$? ;;
+            e) httpx_status_code "$OPTARG" || rc=$? ;;
+            f) httpx_status_code_simple "$OPTARG" || rc=$? ;;
+            g) AlienUrl "$OPTARG" || rc=$? ;;
+            h) VirusTotal "$OPTARG" || rc=$? ;;
             # same verbatim-forwarding as -b.
-            i) TechDetect "$OPTARG" "${@:OPTIND}"; break ;;
-            s) boomer_save_key "$OPTARG" ;;
+            i) TechDetect "$OPTARG" "${@:OPTIND}" || rc=$?; break ;;
+            s) boomer_save_key "$OPTARG" || rc=$? ;;
             *) usage ;;
         esac
     done
@@ -478,6 +748,7 @@ main() {
     if [ $OPTIND -eq 1 ]; then
         usage
     fi
+    return "$rc"
 }
 
 main "$@"
