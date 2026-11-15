@@ -7,6 +7,12 @@ BOOMER_OTX_KEY_FILE="$BOOMER_CONFIG_DIR/otx_api_key"
 BOOMER_BUILTIN_VT_KEY=''
 BOOMER_BUILTIN_ST_KEY=''
 
+# Public-suffix data for -a. Multi-label suffixes are checked first; the TLD
+# allowlist below is combined with "any two-letter ccTLD" and xn-- IDN TLDs.
+BOOMER_MULTI_SUFFIXES="ac.uk co.uk com.uk gov.uk ltd.uk me.uk net.uk nhs.uk org.uk plc.uk police.uk sch.uk ac.in co.in firm.in gen.in ind.in net.in nic.in org.in res.in ac.jp ad.jp co.jp ed.jp go.jp gr.jp lg.jp ne.jp or.jp ac.nz co.nz geek.nz gen.nz govt.nz kiwi.nz maori.nz net.nz org.nz school.nz asn.au com.au edu.au gov.au id.au net.au org.au com.br edu.br gov.br net.br org.br com.cn edu.cn gov.cn net.cn org.cn com.hk edu.hk gov.hk idv.hk net.hk org.hk com.mo edu.mo gov.mo net.mo org.mo com.sg edu.sg gov.sg net.sg org.sg per.sg com.tw edu.tw gov.tw idv.tw net.tw org.tw co.kr ne.kr or.kr re.kr pe.kr go.kr mil.kr ac.kr hs.kr ms.kr es.kr sc.kr kg.kr co.za net.za org.za gov.za ac.za web.za com.mx net.mx org.mx edu.mx gob.mx com.ar net.ar org.ar gob.ar edu.ar com.tr net.tr org.tr gov.tr edu.tr av.tr bel.tr biz.tr gen.tr info.tr k12.tr kep.tr mil.tr pol.tr tel.tr tsk.tr tv.tr web.tr com.ua net.ua org.ua gov.ua edu.ua in.ua com.ru net.ru org.ru pp.ru msk.ru spb.ru com.pl net.pl org.pl gov.pl edu.pl info.pl biz.pl com.es net.es org.es nom.es gob.es edu.es com.co net.co org.co edu.co gov.co mil.co nom.co com.pe net.pe org.pe edu.pe gob.pe nom.pe com.ve net.ve org.ve edu.ve gov.ve mil.ve com.ec net.ec org.ec edu.ec gov.ec mil.ec co.il org.il net.il ac.il gov.il muni.il co.id or.id web.id ac.id sch.id go.id mil.id net.id biz.id my.id co.th in.th ac.th go.th mi.th net.th or.th com.my net.my org.my gov.my edu.my com.ph net.ph org.ph gov.ph edu.ph com.vn net.vn org.vn edu.vn gov.vn com.pk net.pk org.pk edu.pk gov.pk com.bd net.bd org.bd edu.bd gov.bd com.np net.np org.np edu.np gov.np com.lk net.lk org.lk edu.lk gov.lk com.eg net.eg org.eg edu.eg gov.eg com.sa net.sa org.sa edu.sa gov.sa med.sa pub.sa com.ae net.ae org.ae ac.ae gov.ae co.ke or.ke ne.ke go.ke ac.ke sc.ke me.ke mobi.ke info.ke co.tz or.tz ac.tz go.tz ne.tz sc.tz co.ug or.ug ac.ug go.ug ne.ug sc.ug com.ng net.ng org.ng edu.ng gov.ng co.zw org.zw ac.zw gov.zw com.gh edu.gh gov.gh org.gh com.cy net.cy org.cy gov.cy ac.cy com.mt net.mt org.mt edu.mt gov.mt com.ge net.ge org.ge edu.ge gov.ge com.az net.az org.az edu.az gov.az co.uz com.uz net.uz org.uz com.kz net.kz org.kz edu.kz gov.kz mil.kz com.by net.by org.by com.md net.md org.md com.ro net.ro org.ro com.hr net.hr org.hr com.lt net.lt org.lt com.lv net.lv org.lv com.ee net.ee org.ee com.sk net.sk org.sk com.si net.si org.si com.ba net.ba org.ba com.mk net.mk org.mk com.al net.al org.al com.gr net.gr org.gr edu.gr gov.gr com.pt net.pt org.pt edu.pt gov.pt co.at or.at co.hu org.hu com.uy net.uy org.uy edu.uy gub.uy com.bo net.bo org.bo edu.bo gob.bo com.py net.py org.py edu.py gov.py com.do net.do org.do edu.do gob.do com.gt net.gt org.gt edu.gt gob.gt com.sv net.sv org.sv edu.sv gob.sv com.hn net.hn org.hn edu.hn gob.hn com.ni net.ni org.ni edu.ni gob.ni com.pa net.pa org.pa edu.pa gob.pa com.cr co.cr net.cr org.cr edu.cr go.cr"
+
+BOOMER_TLDS="com net org edu gov mil int info biz name pro aero coop museum jobs mobi travel asia tel cat post xxx app dev page site website blog shop store online tech cloud ai io co me tv cc ws xyz top club vip fun live life world today space press digital network agency solutions services systems software tools team works company business center support social media news email click link designs studio codes run one art icu lol buzz mom dad foo bar rest ooo quest spa beauty hair skin makeup cooking recipes coffee pizza beer wine food farm garden green eco earth land property properties estate homes house rentals rent lease apartments condo mortgage loans credit finance financial money bank capital fund investments insurance lawyer attorney legal accounting accountant tax cpa mba degree school education academy institute training courses university college engineering science technology computer computers electronics design graphics photo photography photos pics pictures video videos audio music band radio movie movies film films theater theatre tickets games game play casino poker bet bid health healthcare clinic doctor dental dentist hospital pharmacy travel tours town city country global international mail chat dating date singles love wedding fashion clothing shoes jewelry watches auto cars bike motorcycles law legal energy solar construction contractors plumbing cleaning repair delivery express host hosting domains service services support help store shop shopping sale deals discount cheap gmbh llc ltd limited corp company inc wiki zone news careers estate expo esq"
+
 boomer_config_dir() {
     mkdir -p "$BOOMER_CONFIG_DIR" 2>/dev/null && chmod 700 "$BOOMER_CONFIG_DIR" 2>/dev/null
 }
@@ -107,6 +113,56 @@ boomer_normalize_domain() {
     [[ -z "$raw" || ${#raw} -gt 253 ]] && return 1
     [[ "$raw" =~ ^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)+$ ]] || return 1
     BOOMER_NORMALIZED="$raw"
+    return 0
+}
+
+boomer_is_ipv4() {
+    [[ "$1" =~ ^[0-9]{1,3}(\.[0-9]{1,3}){3}$ ]] || return 1
+    local octet
+    local IFS=.
+    for octet in $1; do
+        [[ "$octet" =~ ^[0-9]+$ ]] || return 1
+        (( octet <= 255 )) || return 1
+    done
+    return 0
+}
+
+boomer_valid_tld() {
+    local tld="$1"
+    [[ -z "$tld" ]] && return 1
+    # ccTLDs are two letters; IDN TLDs are punycode-encoded.
+    (( ${#tld} == 2 )) && return 0
+    [[ "$tld" == xn--* ]] && return 0
+    case " $BOOMER_TLDS " in
+        *" $tld "*) return 0 ;;
+    esac
+    return 1
+}
+
+# Turn any input (URL, schemeless host, subdomain, wildcard) into the
+# registrable domain: https://www.dell.com/x -> dell.com, a.b.co.uk -> b.co.uk.
+# Rejects hosts whose last label is not a known public suffix (random.raunak).
+boomer_apex_domain() {
+    local host="$1"
+    local -a labels
+    local n tld last2 apex
+    IFS='.' read -r -a labels <<< "$host"
+    n=${#labels[@]}
+    (( n >= 2 )) || return 1
+    tld="${labels[$((n - 1))]}"
+    boomer_valid_tld "$tld" || return 1
+    last2="${labels[$((n - 2))]}.${tld}"
+    case " $BOOMER_MULTI_SUFFIXES " in
+        *" $last2 "*)
+            (( n >= 3 )) || return 1
+            apex="${labels[$((n - 3))]}.${last2}"
+            ;;
+        *)
+            apex="$last2"
+            ;;
+    esac
+    [[ -z "$apex" ]] && return 1
+    BOOMER_APEX="$apex"
     return 0
 }
 
@@ -509,36 +565,56 @@ VirusTotal() {
 }
 
 AllDomz() {
-    local domain=$1
-    if [[ -z "$domain" ]]; then
-        echo "Usage: $0 -a <domain>" >&2
+    local input=$1
+    if [[ -z "$input" ]]; then
+        echo "Usage: $0 -a <domain|url>" >&2
         return 1
     fi
     if ! command -v anew >/dev/null 2>&1; then
         echo "[ERROR] anew not found on PATH" >&2
         return 1
     fi
-    local apex="$domain"
-    apex="${apex#https://}"
-    apex="${apex#http://}"
-    apex="${apex%%/*}"
-    apex="${apex%%:*}"
-    apex="$(echo "$apex" | tr '[:upper:]' '[:lower:]' | xargs)"
-    if [[ -z "$apex" ]]; then
-        echo "[ERROR] could not parse domain from input: $domain" >&2
+
+    local lowered host apex
+    lowered="$(printf '%s' "$input" | LC_ALL=C tr '[:upper:]' '[:lower:]')"
+    if ! boomer_normalize_domain "$lowered"; then
+        echo "[ERROR] invalid domain: $input" >&2
         return 1
     fi
+    host="$BOOMER_NORMALIZED"
+    if boomer_is_ipv4 "$host"; then
+        echo "[ERROR] not a domain (looks like an IP address): $input" >&2
+        return 1
+    fi
+    if ! boomer_apex_domain "$host"; then
+        echo "[ERROR] invalid domain (unknown public suffix/TLD): $input" >&2
+        return 1
+    fi
+    apex="$BOOMER_APEX"
+    if [[ "$apex" != "$host" ]]; then
+        echo "[INFO] Using registrable domain: $apex (from $host)"
+    fi
+
+    local outdir="${apex}-subdomains"
+    if ! mkdir -p "$outdir" 2>/dev/null; then
+        echo "[ERROR] could not create output directory: $outdir" >&2
+        return 1
+    fi
+    echo "[INFO] Target: $apex"
+    echo "[INFO] Output directory: $outdir"
+    printf '%s\n' "$apex" > "$outdir/target.txt" 2>/dev/null || true
+
     prune_empty() { [[ -f "$1" ]] && [[ ! -s "$1" ]] && rm -f "$1"; }
     if command -v curl >/dev/null 2>&1; then
-        if ! curl -s --max-time 60 "https://crt.name/v1/search?apex=$apex" | grep -v -E '^(missing apex parameter|invalid apex)' | sed 's/^\*\.//' | anew SubList1.txt; then
+        if ! curl -s --max-time 60 "https://crt.name/v1/search?apex=$apex" | grep -v -E '^(missing apex parameter|invalid apex)' | sed 's/^\*\.//' | anew "$outdir/SubList1.txt"; then
             echo "[WARN] crt.name request failed for $apex, skipping" >&2
         fi
     else
         echo "[WARN] curl not found, skipping crt.name source" >&2
     fi
-    prune_empty SubList1.txt
+    prune_empty "$outdir/SubList1.txt"
     if command -v curl >/dev/null 2>&1; then
-        local sdom_tmp
+        local sdom_tmp st_key
         sdom_tmp="$(mktemp)"
         if command -v jq >/dev/null 2>&1; then
             curl -s --max-time 30 "https://api.subdomain.center/?domain=$apex" | jq -r '.[]?' 2>/dev/null >> "$sdom_tmp" &
@@ -558,12 +634,12 @@ AllDomz() {
         curl -s --max-time 30 "https://api.hackertarget.com/hostsearch/?q=$apex" | cut -d ',' -f1 | grep -iE "^[A-Za-z0-9_.-]+\.${apex//./\\.}$" >> "$sdom_tmp" &
         curl -s --max-time 30 -A "Mozilla/5.0" "https://rapiddns.io/subdomain/$apex?full=1" | grep -oE "[A-Za-z0-9._-]+\.$apex" 2>/dev/null >> "$sdom_tmp" &
         wait
-        tr -d '\r' < "$sdom_tmp" | sed 's/^\*\.//;s/^[[:space:]]*//;s/[[:space:]]*$//' | grep -E '^[A-Za-z0-9_.-]+$' | grep -iv "^\*" | grep -iE "(^|\.)${apex//./\\.}$" | sort -u | anew SubList2.txt
+        tr -d '\r' < "$sdom_tmp" | sed 's/^\*\.//;s/^[[:space:]]*//;s/[[:space:]]*$//' | grep -E '^[A-Za-z0-9_.-]+$' | grep -iv "^\*" | grep -iE "(^|\.)${apex//./\\.}$" | sort -u | anew "$outdir/SubList2.txt"
         rm -f "$sdom_tmp"
     else
         echo "[WARN] curl not found, skipping subdom sources" >&2
     fi
-    prune_empty SubList2.txt
+    prune_empty "$outdir/SubList2.txt"
     if command -v curl >/dev/null 2>&1; then
         if ! curl -s --max-time 30 -A "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36" -H "Accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8" -H "Referer: https://account.shodan.io/?language=en" "https://www.shodan.io/domain/$apex" | sed -n '/<ul id="subdomains">/,/<\/ul>/p' | grep -oE '<li>[^<]+</li>' | sed -E 's/<\/?li>//g;s/^[[:space:]]*//;s/[[:space:]]*$//' | while IFS= read -r prefix; do
             [[ -z "$prefix" ]] && continue
@@ -572,53 +648,58 @@ AllDomz() {
             else
                 echo "$prefix.$apex"
             fi
-        done | anew SubList3.txt; then
+        done | anew "$outdir/SubList3.txt"; then
             echo "[WARN] shodan.io scrape failed for $apex, skipping" >&2
         fi
     else
         echo "[WARN] curl not found, skipping shodan.io source" >&2
     fi
-    prune_empty SubList3.txt
+    prune_empty "$outdir/SubList3.txt"
     if command -v subfinder >/dev/null 2>&1; then
-        subfinder -all -recursive -silent -nc -d "$domain" | anew SubList4.txt
+        subfinder -all -recursive -silent -nc -d "$apex" | anew "$outdir/SubList4.txt"
     else
         echo "[WARN] subfinder not found, skipping" >&2
     fi
-    prune_empty SubList4.txt
+    prune_empty "$outdir/SubList4.txt"
     if command -v assetfinder >/dev/null 2>&1; then
-        assetfinder -subs-only "$domain" | anew SubList5.txt
+        assetfinder -subs-only "$apex" | anew "$outdir/SubList5.txt"
     else
         echo "[WARN] assetfinder not found, skipping" >&2
     fi
-    prune_empty SubList5.txt
+    prune_empty "$outdir/SubList5.txt"
     if command -v subdominator >/dev/null 2>&1; then
-        subdominator -nc -d "$domain" | anew SubList6.txt
+        subdominator -nc -d "$apex" | anew "$outdir/SubList6.txt"
     else
         echo "[WARN] subdominator not found, skipping" >&2
     fi
-    prune_empty SubList6.txt
+    prune_empty "$outdir/SubList6.txt"
     if command -v curl >/dev/null 2>&1 && command -v jq >/dev/null 2>&1; then
+        local vt_sub_key
         vt_sub_key="$(boomer_vt_key)"
         if [[ -n "$vt_sub_key" ]]; then
-            curl -s --max-time 60 "https://www.virustotal.com/vtapi/v2/domain/report?apikey=$vt_sub_key&domain=$domain" | jq -r '.subdomains[]?, .domain_siblings[]?' 2>/dev/null | anew SubList7.txt
+            curl -s --max-time 60 "https://www.virustotal.com/vtapi/v2/domain/report?apikey=$vt_sub_key&domain=$apex" | jq -r '.subdomains[]?, .domain_siblings[]?' 2>/dev/null | anew "$outdir/SubList7.txt"
         else
             echo "[WARN] no VirusTotal API key saved, skipping that source (run: $0 -s <APIKEY>)" >&2
         fi
     else
         echo "[WARN] curl/jq not found, skipping VirusTotal source" >&2
     fi
-    prune_empty SubList7.txt
+    prune_empty "$outdir/SubList7.txt"
     local parts=()
     local f
-    for f in SubList1.txt SubList2.txt SubList3.txt SubList4.txt SubList5.txt SubList6.txt SubList7.txt; do
+    for f in "$outdir/SubList1.txt" "$outdir/SubList2.txt" "$outdir/SubList3.txt" "$outdir/SubList4.txt" "$outdir/SubList5.txt" "$outdir/SubList6.txt" "$outdir/SubList7.txt"; do
         [[ -s "$f" ]] && parts+=("$f")
     done
     if [[ ${#parts[@]} -eq 0 ]]; then
-        echo "[ERROR] no subdomain data collected" >&2
+        echo "[ERROR] no subdomain data collected for $apex" >&2
         return 1
     fi
-    cat "${parts[@]}" | anew subs.txt
-    prune_empty subs.txt
+    cat "${parts[@]}" | anew "$outdir/subs.txt"
+    prune_empty "$outdir/subs.txt"
+    if [[ -s "$outdir/subs.txt" ]]; then
+        echo "[INFO] $(wc -l < "$outdir/subs.txt" | tr -d ' ') unique subdomains saved to $outdir/subs.txt"
+    fi
+    return 0
 }
 
 EndpointFinder() {

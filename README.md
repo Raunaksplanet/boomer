@@ -155,7 +155,7 @@ Rate limits are tunable: `BOOMER_VT_DELAY`, `BOOMER_VT_BACKOFF`,
 ## Usage
 
 ```bash
-boomer -a target.com                    # subdomains from 10+ passive sources
+boomer -a <domain|url>                  # subdomains from 10+ passive sources
 boomer -b <url|file> [args...]          # endpoint discovery
 boomer -c <file>                        # live hosts → 200s/300s/400s/500s.txt
 boomer -d <file>                        # same, bare URLs only
@@ -175,16 +175,56 @@ boomer -i example.com --workers 1 --delay 2
 ```
 
 `-a` writes `SubList1..7.txt` (non-empty sources only) and merges them into
-`subs.txt`. `-g` appends to `AlienResult.txt`; `-h` appends to
-`VirusTotalResult.txt`.
+`subs.txt` inside a per-target folder. `-g` appends to `AlienResult.txt`;
+`-h` appends to `VirusTotalResult.txt`.
+
+## Target normalization (`-a`)
+
+`-a` accepts almost anything and reduces it to the **registrable domain** before
+touching any source:
+
+```bash
+boomer -a https://www.dell.com/en-in?utm=1   # -> dell.com
+boomer -a WWW.DELL.COM.                      # -> dell.com
+boomer -a dell.com:443                       # -> dell.com
+boomer -a foo.bar.example.co.uk              # -> example.co.uk
+boomer -a "*.example.com"                    # -> example.com
+boomer -a random.raunak                      # rejected: unknown public suffix
+boomer -a 192.168.1.1                        # rejected: IP address
+```
+
+- Schemes, `user:pass@`, ports, paths, queries, fragments, trailing dots and
+  `*.` wildcards are stripped.
+- Multi-label public suffixes are handled (`co.uk`, `com.au`, `com.br`,
+  `com.tr`, …), so the registrable domain is correct instead of just the last
+  two labels.
+- The TLD must be a known gTLD, a two-letter ccTLD, or a punycode (`xn--`) IDN;
+  otherwise the input is rejected before any request is made.
+- The apex is used for **every** source (subfinder, assetfinder, subdominator,
+  VirusTotal included), not the raw input.
+
+Each run creates its own folder, so targets never mix:
+
+```text
+dell.com-subdomains/
+├── target.txt
+├── SubList1.txt      # crt.name
+├── SubList2.txt      # subdomain.center / urlscan / myssl / certspotter / netlas / SecurityTrails / hackertarget / rapiddns
+├── SubList3.txt      # shodan.io scrape
+├── SubList4.txt      # subfinder
+├── SubList5.txt      # assetfinder
+├── SubList6.txt      # subdominator
+├── SubList7.txt      # VirusTotal
+└── subs.txt          # merged, de-duplicated
+```
+
+Empty sources leave no files behind and are skipped in the final `subs.txt`.
 
 ## Sources (`-a`)
 
 crt.name, subdomain.center, urlscan.io, myssl, certspotter, netlas,
 SecurityTrails, hackertarget, rapiddns, shodan.io scrape, subfinder,
 assetfinder, subdominator, VirusTotal.
-
-Empty sources leave no files behind and are skipped in the final `subs.txt`.
 
 ## Notes
 
