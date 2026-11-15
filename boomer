@@ -206,15 +206,11 @@ usage() {
     echo "Usage: $0 [options]
     -a        AllDomz
     -b        EndpointFinder <url|file> [extra endpoint-finder args...]
-    -c        Status codes: grouped full lines   (alias: -x --full-only --class-only)
-    -d        Status codes: grouped clean URLs   (alias: -x --clean-only --class-only)
-    -e        Status codes: exact full lines     (alias: -x --no-probe --full-only --exact-only)
-    -f        Status codes: exact clean URLs     (alias: -x --clean-only --exact-only)
+    -c        StatusCodes <url|file|-> [options]  (probe/parse + full/clean + class/exact)
     -g        Alien Url's
     -h        Virus Total
     -i        TechDetect <url|file> [extra techdetect args...]
-    -s        Save API key  ([-s st:<key>] [-s otx:<key>])
-    -x        StatusCodes <url|file|-> [options] (probe/parse, clean+full, class+exact)"
+    -s        Save API key  ([-s st:<key>] [-s otx:<key>])"
     exit 1
 }
 
@@ -304,7 +300,7 @@ StatusSort() {
             --tech) tech=1; shift ;;
             --append) append=1; shift ;;
             -h|--help)
-                echo "Usage: $0 -x <url|file|-> [options]"
+                echo "Usage: $0 -c <url|file|-> [options]"
                 echo "  --probe            force httpx probing"
                 echo "  --no-probe         parse an existing httpx file (no probing)"
                 echo "  --clean-only       bare URLs only"
@@ -322,14 +318,14 @@ StatusSort() {
                 return 0
                 ;;
             *)
-                echo "[ERROR] unknown -x option: $1" >&2
+                echo "[ERROR] unknown -c option: $1" >&2
                 return 1
                 ;;
         esac
     done
 
     if [[ -z "$input" ]]; then
-        echo "Usage: $0 -x <url|file|-> [options]" >&2
+        echo "Usage: $0 -c <url|file|-> [options]" >&2
         return 1
     fi
 
@@ -461,12 +457,10 @@ StatusSort() {
     while IFS=$'\t' read -r url code ln; do
         class="${code:0:1}00"
         if (( want_clean )); then
-            printf '%s\n' "$url" >> "$outdir/clean-all.txt"
             (( want_class )) && printf '%s\n' "$url" >> "$outdir/clean-${class}s.txt"
             (( want_exact )) && printf '%s\n' "$url" >> "$outdir/clean-${code}.txt"
         fi
         if (( want_full )); then
-            printf '%s\n' "$ln" >> "$outdir/full-all.txt"
             (( want_class )) && printf '%s\n' "$ln" >> "$outdir/full-${class}s.txt"
             (( want_exact )) && printf '%s\n' "$ln" >> "$outdir/full-${code}.txt"
         fi
@@ -1038,22 +1032,19 @@ TechDetect() {
 
 main() {
     local rc=0
-    while getopts ":a:b:c:d:e:f:g:h:i:s:x:" opt; do
+    while getopts ":a:b:c:g:h:i:s:" opt; do
         case $opt in
             a) AllDomz "$OPTARG" || rc=$? ;;
             # -b consumes the rest of the command line: input + verbatim
             # endpoint-finder args (getopts would otherwise reject them).
             b) EndpointFinder "$OPTARG" "${@:OPTIND}" || rc=$?; break ;;
-            c) StatusSort "$OPTARG" --probe --full-only --class-only || rc=$? ;;
-            d) StatusSort "$OPTARG" --probe --clean-only --class-only || rc=$? ;;
-            e) StatusSort "$OPTARG" --no-probe --full-only --exact-only || rc=$? ;;
-            f) StatusSort "$OPTARG" --probe --clean-only --exact-only || rc=$? ;;
+            # -c also forwards its trailing --options to StatusSort.
+            c) StatusSort "$OPTARG" "${@:OPTIND}" || rc=$?; break ;;
             g) AlienUrl "$OPTARG" || rc=$? ;;
             h) VirusTotal "$OPTARG" || rc=$? ;;
             # same verbatim-forwarding as -b.
             i) TechDetect "$OPTARG" "${@:OPTIND}" || rc=$?; break ;;
             s) boomer_save_key "$OPTARG" || rc=$? ;;
-            x) StatusSort "$OPTARG" "${@:OPTIND}" || rc=$?; break ;;
             *) usage ;;
         esac
     done

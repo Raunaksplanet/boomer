@@ -22,7 +22,7 @@ installed separately.
 | `subfinder` | `-a` (optional source) | optional |
 | `assetfinder` | `-a` (optional source) | optional |
 | `subdominator` | `-a` (optional source) | optional |
-| `httpx-toolkit` | `-x` (probe mode), `-c -d -f` | **yes** for those modes |
+| `httpx-toolkit` | `-c` (probe mode) | **yes** for `-c` |
 | `endpoint-finder` | `-b` | **yes** for `-b` |
 | `techdetect` | `-i` | **yes** for `-i` |
 
@@ -32,11 +32,7 @@ installed separately.
 |---|---|---|---|
 | `-a` | AllDomz (subdomains) | `curl`, `anew`; `jq` for 6 sources; optional `subfinder`, `assetfinder`, `subdominator` | optional VT + SecurityTrails |
 | `-b` | EndpointFinder | `endpoint-finder` → Node + Playwright Chromium | — |
-| `-x` | StatusCodes (probe or parse) | `httpx-toolkit` when probing; none when parsing | — |
-| `-c` | alias: `-x --full-only --class-only` | `httpx-toolkit` | — |
-| `-d` | alias: `-x --clean-only --class-only` | `httpx-toolkit` | — |
-| `-e` | alias: `-x --no-probe --full-only --exact-only` | none | — |
-| `-f` | alias: `-x --clean-only --exact-only` | `httpx-toolkit` | — |
+| `-c` | StatusCodes (probe or parse) | `httpx-toolkit` when probing; none when parsing | — |
 | `-g` | AlienVault OTX URLs | `curl`, `jq` | optional OTX |
 | `-h` | VirusTotal undetected URLs | `curl`, `jq` | **required** VT |
 | `-i` | TechDetect | `techdetect` → Python + Playwright Chromium | — |
@@ -158,23 +154,19 @@ Rate limits are tunable: `BOOMER_VT_DELAY`, `BOOMER_VT_BACKOFF`,
 ```bash
 boomer -a <domain|url>                  # subdomains from 10+ passive sources
 boomer -b <url|file> [args...]          # endpoint discovery
-boomer -x <url|file|-> [options]        # status codes: probe/parse, clean+full
-boomer -c <file>                        # alias: grouped full lines
-boomer -d <file>                        # alias: grouped clean URLs
-boomer -e <httpx-file>                  # alias: exact full lines (no probe)
-boomer -f <file>                        # alias: exact clean URLs
+boomer -c <url|file|-> [options]        # status codes: probe/parse, full+clean
 boomer -g <domain|file>                 # AlienVault OTX URLs
 boomer -h <domain|file>                 # VirusTotal undetected URLs
 boomer -i <url|file> [args...]          # tech detection
 boomer -s <key>                         # save an API key
 ```
 
-Extra arguments after `-b`/`-i`/`-x` are forwarded verbatim:
+Extra arguments after `-b`/`-i`/`-c` are forwarded verbatim:
 
 ```bash
 boomer -b https://example.com --scope host --wait 3
 boomer -i example.com --workers 1 --delay 2
-boomer -x subs.txt --timeout 15 --rate-limit 10
+boomer -c subs.txt --timeout 15 --rate-limit 10
 ```
 
 `-a` writes `SubList1..7.txt` (non-empty sources only) and merges them into
@@ -223,17 +215,17 @@ dell.com-subdomains/
 
 Empty sources leave no files behind and are skipped in the final `subs.txt`.
 
-## Status code sorting (`-x`)
+## Status code sorting (`-c`)
 
-One command replaces `-c`, `-d`, `-e` and `-f`. It accepts a URL, a host list,
-an existing httpx output file, or stdin (`-`), and decides automatically whether
-to probe:
+One command does everything the old `-c`, `-d`, `-e` and `-f` did. Give it a
+URL, a host list, an existing httpx output file, or stdin (`-`); it decides
+automatically whether to probe:
 
 ```bash
-boomer -x subs.txt                 # host list  -> httpx probe
-boomer -x httpx-output.txt         # has [NNN]  -> parse, no probe
-boomer -x https://example.com      # single URL -> probe
-cat subs.txt | boomer -x -         # stdin      -> probe
+boomer -c subs.txt                 # host list  -> httpx probe
+boomer -c httpx-output.txt         # has [NNN]  -> parse, no probe
+boomer -c https://example.com      # single URL -> probe
+cat subs.txt | boomer -c -         # stdin      -> probe
 ```
 
 Each run writes a per-target folder (named after the apex, a sibling
@@ -243,16 +235,14 @@ Each run writes a per-target folder (named after the apex, a sibling
 example.com-statuscodes/
 ├── target.txt
 ├── summary.txt
-├── clean-all.txt          # every URL, bare
-├── clean-200s.txt         # URL, grouped class (100s/200s/300s/400s/500s)
-├── clean-200.txt          # URL, exact status
-├── full-all.txt           # every httpx line
-├── full-200s.txt          # full line, grouped class
-└── full-200.txt           # full line, exact status
+├── clean-200s.txt      # bare URLs, grouped class (100s/200s/300s/400s/500s)
+├── clean-200.txt       # bare URLs, exact status
+├── full-200s.txt       # original httpx lines, grouped class
+└── full-200.txt        # original httpx lines, exact status
 ```
 
-- `clean-*` = bare URLs (the old `-d`/`-f` output).
 - `full-*` = original httpx lines incl. title/tech (the old `-c`/`-e` output).
+- `clean-*` = bare URLs only (the old `-d`/`-f` output).
 - `*s.txt` = class bucket (`200s`), no `s` = exact code (`200`).
 - Files are sorted and de-duplicated; empty buckets are not created.
 - `--append` merges into an existing folder instead of overwriting.
@@ -270,15 +260,6 @@ Options:
 | `--append` | keep existing files, merge new results |
 | `--outdir DIR` | override `<base>-statuscodes/` |
 | `--threads N` `--timeout N` `--retries N` `--rate-limit N` | httpx tuning |
-
-`-c`, `-d`, `-e`, `-f` still work as thin aliases with the same output folder:
-
-| Alias | Equivalent |
-|---|---|
-| `-c <file>` | `-x --probe --full-only --class-only` |
-| `-d <file>` | `-x --probe --clean-only --class-only` |
-| `-e <httpx-file>` | `-x --no-probe --full-only --exact-only` |
-| `-f <file>` | `-x --probe --clean-only --exact-only` |
 
 ## Sources (`-a`)
 
