@@ -4,7 +4,8 @@
 Installs everything boomer shells out to:
 
     base      bash, curl, git, jq
-    scanners  anew, subfinder, assetfinder, subdominator, httpx-toolkit
+    scanners  anew, subfinder, assetfinder, subdominator (Python 3.13+),
+              httpx-toolkit
     headless  Node.js 18+ + endpoint-finder + Playwright Chromium
               Python 3.9+ + techdetect + Playwright Chromium
     boomer    this repo's boomer script on PATH
@@ -41,6 +42,7 @@ IS_WINDOWS = os.name == "nt"
 IS_MAC = sys.platform == "darwin"
 IS_LINUX = sys.platform.startswith("linux")
 MIN_PYTHON = (3, 8)
+SUBDOMINATOR_PYTHON = (3, 13)
 
 ENDPOINT_FINDER_REPO = "https://github.com/Raunaksplanet/endpoint-finder"
 TECHDETECT_REPO = "https://github.com/Raunaksplanet/techdetect"
@@ -543,16 +545,58 @@ def ensure_python() -> None:
     augment_path()
 
 
-def install_pipx_tool(package: str, binary: str, force: bool) -> None:
+def find_python(version: tuple) -> List[str]:
+    """Return a Python command list whose interpreter is >= version."""
+    if sys.version_info[:2] >= version:
+        return [sys.executable]
+    probe = ("import sys; raise SystemExit(0 if sys.version_info[:2] >= (%d, %d) else 1)"
+             % version)
+    candidates = [["python%d.%d" % version]]
+    if IS_WINDOWS:
+        candidates += [["py", "-%d.%d" % version], ["python"]]
+    else:
+        candidates.append(["python3"])
+    for base in candidates:
+        if not have(base[0]):
+            continue
+        try:
+            proc = subprocess.run(
+                _windows_resolve(base + ["-c", probe]),
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            )
+        except OSError:
+            continue
+        if proc.returncode == 0:
+            return base
+    return []
+
+
+def install_pipx_tool(package: str, binary: str, force: bool,
+                      min_python: Optional[tuple] = None) -> None:
+    py = find_python(min_python) if min_python else []
+    if min_python and not py:
+        warn("%s needs Python %d.%d+; pipx will use its default interpreter"
+             % ((package,) + tuple(min_python)))
+    python_args = ["--python", py[0]] if py else []
     if have(binary) and not force:
-        ok("%s already installed" % binary)
+        ok("%s already installed (--force upgrades it)" % binary)
         return
     ensure_python()
     if have("pipx"):
-        user_run(["pipx", "install", package], "pipx install " + package, check=False)
+        if have(binary):
+            rc = user_run(["pipx", "upgrade", package],
+                          "pipx upgrade " + package, check=False)
+            if rc == 0:
+                return
+            user_run(["pipx", "install", "--force"] + python_args + [package],
+                     "pipx install --force " + package, check=False)
+            return
+        user_run(["pipx", "install"] + python_args + [package],
+                 "pipx install " + package, check=False)
         return
-    cmd = [sys.executable, "-m", "pip", "install", "--user", package]
-    rc = user_run(cmd, "pip install --user " + package, check=False)
+    interpreter = py + ["-m", "pip"] if py else [sys.executable, "-m", "pip"]
+    cmd = interpreter + ["install", "--user", "--upgrade", package]
+    rc = user_run(cmd, "pip install --user --upgrade " + package, check=False)
     if rc != 0:
         # Debian/Ubuntu PEP 668 "externally managed environment"
         user_run(cmd + ["--break-system-packages"],
@@ -736,7 +780,8 @@ def do_setup(force: bool, skip_browsers: bool, prefix: Optional[str]) -> int:
     install_go_tools(force=force)
 
     log("step 3/7: subdominator")
-    install_pipx_tool("subdominator", "subdominator", force=force)
+    install_pipx_tool("subdominator", "subdominator", force=force,
+                      min_python=SUBDOMINATOR_PYTHON)
 
     log("step 4/7: endpoint-finder + Playwright Chromium")
     install_node_tools(force=force, skip_browsers=skip_browsers)
@@ -771,7 +816,9 @@ def do_setup(force: bool, skip_browsers: bool, prefix: Optional[str]) -> int:
     print("         boomer -s st:<SecurityTrails-key>")
     print("         boomer -s otx:<AlienVault-OTX-key>")
     print("    2. Open a new terminal (or re-source your shell rc) so PATH changes apply.")
-    print("    3. Try:  boomer -a example.com")
+    print("    3. Try:")
+    print("         boomer -a example.com")
+    print("         boomer -c example.com-subdomains/subs.txt")
     if IS_WINDOWS:
         print("    4. Windows: run boomer inside Git Bash or WSL.")
     print("")
@@ -790,7 +837,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--check", action="store_true",
                         help="report installed tools and exit (no changes)")
     parser.add_argument("--force", action="store_true",
-                        help="reinstall tools even when already on PATH")
+                        help="reinstall/upgrade tools even when already on PATH")
     parser.add_argument("--skip-browsers", action="store_true",
                         help="do not download Playwright Chromium")
     parser.add_argument("--prefix", metavar="DIR",

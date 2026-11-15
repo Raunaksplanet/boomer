@@ -21,7 +21,7 @@ installed separately.
 | `anew` | `-a` | **yes** for `-a` |
 | `subfinder` | `-a` (optional source) | optional |
 | `assetfinder` | `-a` (optional source) | optional |
-| `subdominator` | `-a` (optional source) | optional |
+| `subdominator` | `-a` (optional source) | optional, needs Python 3.13+ |
 | `httpx-toolkit` | `-c` (probe mode) | **yes** for `-c` |
 | `endpoint-finder` | `-b` | **yes** for `-b` |
 | `techdetect` | `-i` | **yes** for `-i` |
@@ -62,7 +62,8 @@ enough. If Chromium is missing, `-b`/`-i` fail at launch.
 `setup.py` installs **everything above** end-to-end on Windows, macOS and
 Linux: base tools, Go scanners, `httpx-toolkit`, `subdominator`,
 `endpoint-finder` + Chromium, `techdetect` + Chromium, and `boomer` itself on
-PATH.
+PATH. New installs use the current upstream releases; `--force` upgrades tools
+that are already present.
 
 ```bash
 sudo python3 setup.py --setup     # macOS / Linux (recommended)
@@ -74,7 +75,7 @@ Helpful flags:
 ```bash
 python3 setup.py --help           # show every option
 python3 setup.py --check          # report what is installed, change nothing
-sudo python3 setup.py --setup --force          # reinstall everything
+sudo python3 setup.py --setup --force          # upgrade/reinstall everything
 sudo python3 setup.py --setup --skip-browsers  # skip Chromium downloads
 sudo python3 setup.py --setup --prefix ~/.local/bin
 sudo python3 setup.py --setup --dry-run -v     # show commands, do nothing
@@ -114,7 +115,8 @@ go install github.com/projectdiscovery/httpx/cmd/httpx@latest
 ln -sf "$(go env GOPATH)/bin/httpx" "$(go env GOPATH)/bin/httpx-toolkit"
 
 # subdominator (Python 3.13+)
-pipx install subdominator        # upgrade an existing install: pipx upgrade subdominator
+pipx install --python python3.13 subdominator
+pipx upgrade subdominator        # upgrade an existing install
 
 # headless scanners
 npm install -g endpoint-finder && npx playwright install chromium
@@ -152,7 +154,7 @@ Rate limits are tunable: `BOOMER_VT_DELAY`, `BOOMER_VT_BACKOFF`,
 ## Usage
 
 ```bash
-boomer -a <domain|url>                  # subdomains from 10+ passive sources
+boomer -a <domain|url>                  # subdomains from 14 passive sources
 boomer -b <url|file> [args...]          # endpoint discovery
 boomer -c <url|file|-> [options]        # status codes: probe/parse, full+clean
 boomer -g <domain|file>                 # AlienVault OTX URLs
@@ -216,9 +218,8 @@ Empty sources leave no files behind and are skipped in the final `subs.txt`.
 
 ## Status code sorting (`-c`)
 
-One command does everything the old `-c`, `-d`, `-e` and `-f` did. Give it a
-URL, a host list, an existing httpx output file, or stdin (`-`); it decides
-automatically whether to probe:
+One command for status-code sorting. Give it a URL, a host list, an existing
+httpx output file, or stdin (`-`); it decides automatically whether to probe:
 
 ```bash
 boomer -c subs.txt                 # host list  -> httpx probe
@@ -238,8 +239,8 @@ example.com-statuscodes/
 └── full-301.txt
 ```
 
-- `full-<code>.txt` = original httpx lines incl. title/tech (the old `-c`/`-e` output).
-- `clean-<code>.txt` = bare URLs only (the old `-d`/`-f` output).
+- `full-<code>.txt` = original httpx lines incl. title/tech.
+- `clean-<code>.txt` = bare URLs only.
 - One file pair per status code seen; no grouped `200s`/`300s` files.
 - Files are sorted and de-duplicated; codes with no results get no file.
 - `--append` merges into an existing folder instead of overwriting.
@@ -259,9 +260,45 @@ Options:
 
 ## Sources (`-a`)
 
-crt.name, subdomain.center, urlscan.io, myssl, certspotter, netlas,
-SecurityTrails, hackertarget, rapiddns, shodan.io scrape, subfinder,
+14 providers: crt.name, subdomain.center, urlscan.io, myssl, certspotter,
+netlas, SecurityTrails, hackertarget, rapiddns, shodan.io scrape, subfinder,
 assetfinder, subdominator, VirusTotal.
+
+## Updating tools
+
+`-a` benefits from current releases of its scanners. Upgrade everything in one
+shot:
+
+```bash
+sudo python3 setup.py --setup --force
+```
+
+Or update the individual tools:
+
+```bash
+# Go scanners
+go install github.com/tomnomnom/anew@latest
+go install github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest
+go install github.com/tomnomnom/assetfinder@latest
+go install github.com/projectdiscovery/httpx/cmd/httpx@latest
+
+# subdominator (Python 3.13+)
+pipx upgrade subdominator
+
+# headless scanners
+npm install -g endpoint-finder@latest && npx playwright install chromium
+git -C techdetect pull && (cd techdetect && python3 install.py)
+```
+
+If `pipx upgrade subdominator` fails, reinstall it with a suitable interpreter:
+
+```bash
+pipx install --force --python python3.13 subdominator
+```
+
+Check the installed versions with `subfinder -version`, `httpx-toolkit
+-version` and `subdominator -v`. boomer's `-a` and `-c` calls are tested against
+current releases, including subdominator 3.x.
 
 ## Notes
 
