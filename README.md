@@ -235,16 +235,16 @@ Each run writes a per-target folder (named after the apex, a sibling
 example.com-statuscodes/
 ├── target.txt
 ├── summary.txt
-├── clean-200s.txt      # bare URLs, grouped class (100s/200s/300s/400s/500s)
-├── clean-200.txt       # bare URLs, exact status
-├── full-200s.txt       # original httpx lines, grouped class
-└── full-200.txt        # original httpx lines, exact status
+├── clean-200.txt        # bare URLs, exact status
+├── clean-301.txt
+├── full-200.txt         # original httpx lines, exact status
+└── full-301.txt
 ```
 
-- `full-*` = original httpx lines incl. title/tech (the old `-c`/`-e` output).
-- `clean-*` = bare URLs only (the old `-d`/`-f` output).
-- `*s.txt` = class bucket (`200s`), no `s` = exact code (`200`).
-- Files are sorted and de-duplicated; empty buckets are not created.
+- `full-<code>.txt` = original httpx lines incl. title/tech (the old `-c`/`-e` output).
+- `clean-<code>.txt` = bare URLs only (the old `-d`/`-f` output).
+- One file pair per status code seen; no grouped `200s`/`300s` files.
+- Files are sorted and de-duplicated; codes with no results get no file.
 - `--append` merges into an existing folder instead of overwriting.
 - `summary.txt` records target, source, mode and per-status counts.
 
@@ -254,7 +254,6 @@ Options:
 |---|---|
 | `--probe` / `--no-probe` | force probing or force parsing |
 | `--clean-only` / `--full-only` | only bare URLs / only full lines |
-| `--class-only` / `--exact-only` | only grouped / only exact buckets |
 | `--include-failed` | bucket status-less lines as `000` |
 | `--tech` | add `-td` to the httpx probe |
 | `--append` | keep existing files, merge new results |

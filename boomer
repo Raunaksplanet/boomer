@@ -206,7 +206,7 @@ usage() {
     echo "Usage: $0 [options]
     -a        AllDomz
     -b        EndpointFinder <url|file> [extra endpoint-finder args...]
-    -c        StatusCodes <url|file|-> [options]  (probe/parse + full/clean + class/exact)
+    -c        StatusCodes <url|file|-> [options]  (probe/parse, full-<code>.txt + clean-<code>.txt)
     -g        Alien Url's
     -h        Virus Total
     -i        TechDetect <url|file> [extra techdetect args...]
@@ -266,12 +266,12 @@ boomer_statuscodes_base() {
 
 # Unified status-code sorter. Accepts a URL/host, a host list, an existing
 # httpx output file, or stdin ("-"). Probing vs parsing is auto-detected.
-# Writes <base>-statuscodes/ with clean-* (bare URLs) and full-* (httpx lines),
-# both class buckets (clean-200s.txt) and exact buckets (clean-200.txt).
+# Writes <base>-statuscodes/ with exact-status files only:
+# clean-200.txt (bare URLs) and full-200.txt (original httpx lines).
 StatusSort() {
     local input="$1"
     shift || true
-    local outdir_opt="" probe_mode="auto" formats="both" groups="both"
+    local outdir_opt="" probe_mode="auto" formats="both"
     local include_failed=0 tech=0 append=0
     local threads="" timeout="" retries="" rate_limit=""
     while (( $# > 0 )); do
@@ -294,8 +294,6 @@ StatusSort() {
             --no-probe|--parse) probe_mode="never"; shift ;;
             --clean-only) formats="clean"; shift ;;
             --full-only) formats="full"; shift ;;
-            --class-only) groups="class"; shift ;;
-            --exact-only) groups="exact"; shift ;;
             --include-failed) include_failed=1; shift ;;
             --tech) tech=1; shift ;;
             --append) append=1; shift ;;
@@ -305,8 +303,6 @@ StatusSort() {
                 echo "  --no-probe         parse an existing httpx file (no probing)"
                 echo "  --clean-only       bare URLs only"
                 echo "  --full-only        full httpx lines only"
-                echo "  --class-only       100s/200s/300s/400s/500s buckets only"
-                echo "  --exact-only       per-status buckets only"
                 echo "  --include-failed   bucket lines without a status as 000"
                 echo "  --tech             add -td to httpx probing"
                 echo "  --append           keep existing files instead of overwriting"
@@ -447,23 +443,14 @@ StatusSort() {
     fi
     printf '%s\n' "$base" > "$outdir/target.txt" 2>/dev/null || true
 
-    local want_clean=0 want_full=0 want_class=0 want_exact=0
+    local want_clean=0 want_full=0
     [[ "$formats" == "both" || "$formats" == "clean" ]] && want_clean=1
     [[ "$formats" == "both" || "$formats" == "full" ]] && want_full=1
-    [[ "$groups" == "both" || "$groups" == "class" ]] && want_class=1
-    [[ "$groups" == "both" || "$groups" == "exact" ]] && want_exact=1
 
-    local ln class
+    local ln
     while IFS=$'\t' read -r url code ln; do
-        class="${code:0:1}00"
-        if (( want_clean )); then
-            (( want_class )) && printf '%s\n' "$url" >> "$outdir/clean-${class}s.txt"
-            (( want_exact )) && printf '%s\n' "$url" >> "$outdir/clean-${code}.txt"
-        fi
-        if (( want_full )); then
-            (( want_class )) && printf '%s\n' "$ln" >> "$outdir/full-${class}s.txt"
-            (( want_exact )) && printf '%s\n' "$ln" >> "$outdir/full-${code}.txt"
-        fi
+        (( want_clean )) && printf '%s\n' "$url" >> "$outdir/clean-${code}.txt"
+        (( want_full )) && printf '%s\n' "$ln" >> "$outdir/full-${code}.txt"
     done < "$norm"
 
     local f
