@@ -113,8 +113,8 @@ go install github.com/tomnomnom/assetfinder@latest
 go install github.com/projectdiscovery/httpx/cmd/httpx@latest
 ln -sf "$(go env GOPATH)/bin/httpx" "$(go env GOPATH)/bin/httpx-toolkit"
 
-# subdominator (Python)
-pipx install subdominator        # or: pip install --user subdominator
+# subdominator (Python 3.13+)
+pipx install subdominator        # upgrade an existing install: pipx upgrade subdominator
 
 # headless scanners
 npm install -g endpoint-finder && npx playwright install chromium

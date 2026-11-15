@@ -206,7 +206,7 @@ usage() {
     echo "Usage: $0 [options]
     -a        AllDomz
     -b        EndpointFinder <url|file> [extra endpoint-finder args...]
-    -c        StatusCodes <url|file|-> [options]  (probe/parse, full-<code>.txt + clean-<code>.txt)
+    -c        StatusCodes <url|file|-> [options]
     -g        Alien Url's
     -h        Virus Total
     -i        TechDetect <url|file> [extra techdetect args...]
