@@ -1,7 +1,7 @@
 # boomer
 
 Subdomain enumeration and recon in pure bash: passive subdomain sources,
-endpoint discovery, tech detection and status-code sorting.
+endpoint discovery, tech detection, status-code sorting and screenshots.
 
 ## Contents
 
@@ -30,7 +30,7 @@ Windows: run `python setup.py --setup` (no `sudo`) and use **Git Bash** or **WSL
 ## Installation
 
 `setup.py` installs everything: base tools, the Go scanners, `httpx-toolkit`,
-`subdominator`, both headless scanners plus Chromium, and `boomer` itself on
+`subdominator`, the headless tools plus Chromium, and `boomer` itself on
 PATH. It is safe to re-run; existing tools are left alone unless you pass
 `--force`.
 
@@ -63,10 +63,12 @@ ln -sf "$(go env GOPATH)/bin/httpx" "$(go env GOPATH)/bin/httpx-toolkit"
 # subdominator (needs Python 3.13+)
 pipx install --python python3.13 subdominator
 
-# headless scanners
+# headless tools
 npm install -g endpoint-finder && npx playwright install chromium
 git clone https://github.com/Raunaksplanet/techdetect
 (cd techdetect && python3 install.py)
+git clone https://github.com/Raunaksplanet/websnap
+(cd websnap && ./install.sh)
 
 # boomer
 chmod +x boomer
@@ -90,6 +92,7 @@ cp boomer /opt/homebrew/bin/boomer   # or /usr/local/bin, ~/.local/bin
 | `subfinder`, `assetfinder`, `subdominator` | `-a` | Optional extra sources (subdominator needs Python 3.13+) |
 | [endpoint-finder](https://github.com/Raunaksplanet/endpoint-finder) | `-b` | Node 18+ and Playwright Chromium |
 | [techdetect](https://github.com/Raunaksplanet/techdetect) | `-f` | Python 3.9+ and Playwright Chromium |
+| [websnap](https://github.com/Raunaksplanet/websnap) | `-g` | Node 18+ and Playwright Chromium; `setup.py` installs it |
 
 A bare `pip install playwright` is not enough — both scanners need a real
 Chromium download (`npx playwright install chromium`). `setup.py` does this for
@@ -105,18 +108,22 @@ you.
 | `-d` | AlienVault OTX URLs | `boomer -d example.com` |
 | `-e` | VirusTotal undetected URLs | `boomer -e example.com` |
 | `-f` | Tech detection | `boomer -f example.com` |
-| `-g` | Save an API key | `boomer -g <VirusTotal-key>` |
+| `-g` | Websnap full-page screenshots | `boomer -g subs.txt` |
+| `--key` | Save an API key | `boomer --key <VirusTotal-key>` |
 | `-h` | Top-level usage | `boomer -h` |
 
-Arguments after `-b`, `-c` and `-f` are passed straight to the underlying tool:
+Arguments after `-b`, `-c`, `-f` and `-g` are passed straight to the underlying
+tool:
 
 ```bash
 boomer -b https://example.com --scope host --wait 3
 boomer -c subs.txt --threads 100 --timeout 10
 boomer -f example.com --workers 1 --delay 2
+boomer -g subs.txt --threads 5
 ```
 
-Every command has its own help page, e.g. `boomer -a -h`, `boomer -c -h`.
+Every command has its own help page, e.g. `boomer -a -h`, `boomer -g -h`,
+`boomer --key -h`.
 
 `-a` accepts a domain, subdomain, URL or `*.` wildcard and reduces it to the
 registrable domain first:
@@ -133,9 +140,9 @@ Only `-e` (VirusTotal) needs a key; the others are optional. Save once and
 boomer reuses them:
 
 ```bash
-boomer -g <VirusTotal-key>
-boomer -g st:<SecurityTrails-key>
-boomer -g otx:<AlienVault-OTX-key>
+boomer --key <VirusTotal-key>
+boomer --key st:<SecurityTrails-key>
+boomer --key otx:<AlienVault-OTX-key>
 ```
 
 Keys live in `~/.config/boomer/` (700 directory, 600 files). Environment
@@ -161,6 +168,20 @@ example.com-statuscodes/
 ├── full-200.txt    # full httpx lines
 └── full-301.txt
 ```
+
+`-g` writes full-page screenshots into `<base>-screenshots/`, using the same
+base name as `-a` and `-c`:
+
+```text
+dell.com-screenshots/
+├── www.dell.com.png
+└── shop.dell.com.png
+```
+
+Only images are kept. `websnap` handles popups, lazy loading and blank-page
+retries; extra arguments go straight to it (`-c`, `--per-apex`, `--settle`).
+For a crawled URL list the path is kept in the name:
+`zerodha.com-open-account-huf.png`; query strings get a short hash suffix.
 
 `-d` appends to `AlienResult.txt`; `-e` appends to `VirusTotalResult.txt`.
 Folders contain result data only — no metadata files.
@@ -194,6 +215,7 @@ go install github.com/projectdiscovery/httpx/cmd/httpx@latest
 pipx upgrade subdominator            # Python 3.13+
 npm install -g endpoint-finder@latest && npx playwright install chromium
 git -C techdetect pull && (cd techdetect && python3 install.py)
+git -C websnap pull && (cd websnap && ./install.sh)
 ```
 
 If `pipx upgrade subdominator` fails, reinstall it:
@@ -214,3 +236,4 @@ If `pipx upgrade subdominator` fails, reinstall it:
 - [boomer](https://github.com/Raunaksplanet/boomer)
 - [endpoint-finder](https://github.com/Raunaksplanet/endpoint-finder)
 - [techdetect](https://github.com/Raunaksplanet/techdetect)
+- [websnap](https://github.com/Raunaksplanet/websnap)

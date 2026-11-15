@@ -6,7 +6,7 @@ Installs everything boomer shells out to:
     base      bash, curl, git, jq
     scanners  anew, subfinder, assetfinder, subdominator (Python 3.13+),
               httpx-toolkit
-    headless  Node.js 18+ + endpoint-finder + Playwright Chromium
+    headless  Node.js 18+ + endpoint-finder + websnap + Playwright Chromium
               Python 3.9+ + techdetect + Playwright Chromium
     boomer    this repo's boomer script on PATH
 
@@ -24,6 +24,7 @@ Links:
     https://github.com/Raunaksplanet/boomer
     https://github.com/Raunaksplanet/endpoint-finder
     https://github.com/Raunaksplanet/techdetect
+    https://github.com/Raunaksplanet/websnap
 """
 from __future__ import annotations
 
@@ -46,6 +47,7 @@ SUBDOMINATOR_PYTHON = (3, 13)
 
 ENDPOINT_FINDER_REPO = "https://github.com/Raunaksplanet/endpoint-finder"
 TECHDETECT_REPO = "https://github.com/Raunaksplanet/techdetect"
+WEBSNAP_REPO = "https://github.com/Raunaksplanet/websnap"
 
 # (module, binary) installed with `go install`.
 GO_TOOLS = [
@@ -71,6 +73,7 @@ REQUIRED_BINS = [
     ("httpx-toolkit", "httpx-toolkit"),
     ("endpoint-finder", "endpoint-finder"),
     ("techdetect", "techdetect"),
+    ("websnap", "websnap"),
 ]
 
 DRY_RUN = False
@@ -651,6 +654,38 @@ def install_techdetect(force: bool, skip_browsers: bool) -> None:
             shutil.rmtree(tmpdir, ignore_errors=True)
 
 
+def install_websnap(force: bool, skip_browsers: bool) -> None:
+    if have("websnap") and not force:
+        ok("websnap already installed")
+        return
+    if DRY_RUN:
+        log("would install websnap from " + WEBSNAP_REPO)
+        return
+    if not have("npm"):
+        warn("npm is required to install websnap")
+        return
+    if not have("git"):
+        warn("git is required to install websnap")
+        return
+    tmpdir = tempfile.mkdtemp(prefix="boomer-websnap-")
+    try:
+        user_run(["git", "clone", "--depth", "1", WEBSNAP_REPO, tmpdir],
+                 "clone websnap", check=False)
+        if not os.path.isfile(os.path.join(tmpdir, "package.json")):
+            warn("websnap package.json not found; see " + WEBSNAP_REPO)
+            return
+        user_run(["npm", "install", "-g", tmpdir],
+                 "npm install -g websnap", check=False)
+        if skip_browsers:
+            warn("skipping Playwright Chromium download (--skip-browsers)")
+            return
+        user_run(["npx", "--yes", "playwright", "install", "chromium"],
+                 "install Playwright Chromium (websnap)", check=False)
+    finally:
+        if not DRY_RUN:
+            shutil.rmtree(tmpdir, ignore_errors=True)
+
+
 # --------------------------------------------------------------------------
 # boomer itself
 # --------------------------------------------------------------------------
@@ -752,6 +787,7 @@ def version_report() -> None:
         (["httpx-toolkit", "-version"], "httpx-toolkit"),
         (["subfinder", "-version"], "subfinder"),
         (["techdetect", "--version"], "techdetect"),
+        (["websnap", "--version"], "websnap"),
     ]
     print("")
     for cmd, label in checks:
@@ -773,26 +809,29 @@ def do_setup(force: bool, skip_browsers: bool, prefix: Optional[str]) -> int:
     elif IS_ROOT and not IS_WINDOWS:
         warn("running as root without sudo; npm/pip/go installs will be root-owned")
 
-    log("step 1/7: base tools (bash, curl, git, jq, Go, Node, Python)")
+    log("step 1/8: base tools (bash, curl, git, jq, Go, Node, Python)")
     ensure_base_tools(force=force)
 
-    log("step 2/7: Go scanners (anew, subfinder, assetfinder, httpx)")
+    log("step 2/8: Go scanners (anew, subfinder, assetfinder, httpx)")
     install_go_tools(force=force)
 
-    log("step 3/7: subdominator")
+    log("step 3/8: subdominator")
     install_pipx_tool("subdominator", "subdominator", force=force,
                       min_python=SUBDOMINATOR_PYTHON)
 
-    log("step 4/7: endpoint-finder + Playwright Chromium")
+    log("step 4/8: endpoint-finder + Playwright Chromium")
     install_node_tools(force=force, skip_browsers=skip_browsers)
 
-    log("step 5/7: techdetect + Playwright Chromium")
+    log("step 5/8: techdetect + Playwright Chromium")
     install_techdetect(force=force, skip_browsers=skip_browsers)
 
-    log("step 6/7: install boomer")
+    log("step 6/8: websnap + Playwright Chromium")
+    install_websnap(force=force, skip_browsers=skip_browsers)
+
+    log("step 7/8: install boomer")
     install_boomer(prefix=prefix, force=force)
 
-    log("step 7/7: persist PATH + verify")
+    log("step 8/8: persist PATH + verify")
     dirs = [d for d in (go_bin_dir(), npm_global_bin(),
                         os.path.join(USER_HOME, ".local", "bin"),
                         os.path.join(USER_HOME, "go", "bin")) if d]
@@ -812,9 +851,9 @@ def do_setup(force: bool, skip_browsers: bool, prefix: Optional[str]) -> int:
     print("")
     print("  Next steps:")
     print("    1. Save API keys once (optional but recommended):")
-    print("         boomer -g <VirusTotal-key>")
-    print("         boomer -g st:<SecurityTrails-key>")
-    print("         boomer -g otx:<AlienVault-OTX-key>")
+    print("         boomer --key <VirusTotal-key>")
+    print("         boomer --key st:<SecurityTrails-key>")
+    print("         boomer --key otx:<AlienVault-OTX-key>")
     print("    2. Open a new terminal (or re-source your shell rc) so PATH changes apply.")
     print("    3. Try:")
     print("         boomer -a example.com")

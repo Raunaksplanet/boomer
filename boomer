@@ -75,7 +75,7 @@ boomer_save_key() {
     fi
     spec="$(printf '%s' "$spec" | tr -d ' \t\r\n')"
     if [[ -z "$spec" ]]; then
-        echo "Usage: $0 -g <VirusTotal-API-key>  (or  $0 -g st:<SecurityTrails-key> | otx:<OTX-key>)" >&2
+        echo "Usage: $0 --key <VirusTotal-API-key>  (or  $0 --key st:<SecurityTrails-key> | otx:<OTX-key>)" >&2
         return 1
     fi
     if ! boomer_config_dir; then
@@ -211,7 +211,8 @@ usage() {
     -d        Alien Url's
     -e        Virus Total
     -f        TechDetect <url|file> [extra techdetect args...]
-    -g        Save API key  ([-g st:<key>] [-g otx:<key>])"
+    -g        Websnap screenshots <url|file> [extra args...]
+    --key     Save API key  (st:<key> | otx:<key>)"
     exit "$rc"
 }
 
@@ -247,7 +248,7 @@ Output:
 Requires:
   curl, anew; jq for the jq-based sources
   optional: subfinder, assetfinder, subdominator
-  optional keys: boomer -g st:<key>, boomer -g <VirusTotal-key>
+  optional keys: boomer --key st:<key>, boomer --key <VirusTotal-key>
 
 Examples:
   boomer -a example.com
@@ -324,7 +325,7 @@ slower rate.
 
 Requires:
   curl, jq
-  optional key: boomer -g otx:<key>
+  optional key: boomer --key otx:<key>
 
 Examples:
   boomer -d example.com
@@ -342,7 +343,7 @@ Looks up the target in VirusTotal and appends URLs that VirusTotal has not
 flagged to VirusTotalResult.txt.
 
 Requires:
-  curl, jq and a VirusTotal API key (boomer -g <key>)
+  curl, jq and a VirusTotal API key (boomer --key <key>)
 
 Examples:
   boomer -e example.com
@@ -369,20 +370,52 @@ EOF
             ;;
         g)
             cat <<'EOF'
-boomer -g — save an API key
+boomer -g — full-page screenshots
 
 Usage:
-  boomer -g <VirusTotal-key>
-  boomer -g st:<SecurityTrails-key>
-  boomer -g otx:<AlienVault-OTX-key>
+  boomer -g <url|file> [extra websnap args...]
+
+Captures the whole page, not just the viewport, with websnap. Accepts a
+domain, a www host, a schemeless host, a full http(s) URL or a file. Arguments
+after the input are forwarded to websnap.
+
+Output:
+  <base>-screenshots/
+    <host>.png            for a domain root
+    <host>-<path>.png     for a crawled URL (/open-account/huf)
+
+The folder name follows the same rules as -a and -c: a sibling
+<apex>-subdomains folder name, otherwise the single apex domain, otherwise
+the input file name. So subs.txt from dell.com lands in
+dell.com-screenshots/.
+
+Requires:
+  websnap (Node.js + Playwright Chromium)
+  install: cd websnap && ./install.sh
+
+Examples:
+  boomer -g https://example.com
+  boomer -g www.dell.com
+  boomer -g subs.txt
+  boomer -g subs.txt -c 10 --per-apex 5
+EOF
+            ;;
+        key)
+            cat <<'EOF'
+boomer --key — save an API key
+
+Usage:
+  boomer --key <VirusTotal-key>
+  boomer --key st:<SecurityTrails-key>
+  boomer --key otx:<AlienVault-OTX-key>
 
 Stores keys in ~/.config/boomer/ with 700 directory / 600 file permissions.
 Saved keys are reused automatically by -a, -d and -e.
 
 Examples:
-  boomer -g 0123456789abcdef
-  boomer -g st:xxxxxxxxxxxx
-  boomer -g otx:xxxxxxxxxxxx
+  boomer --key 0123456789abcdef
+  boomer --key st:xxxxxxxxxxxx
+  boomer --key otx:xxxxxxxxxxxx
 EOF
             ;;
         *)
@@ -391,10 +424,12 @@ EOF
     esac
 }
 
-# Decide <base>-statuscodes/ for an input: reuse a sibling -subdomains
+# Decide the folder prefix for an input: reuse a sibling -subdomains
 # folder name, otherwise the single apex domain, otherwise the file name.
-boomer_statuscodes_base() {
+# $2 is the fallback when the input cannot be mapped to a domain.
+boomer_scope_base() {
     local input="$1"
+    local fallback="${2:-scope}"
     local parent base apex lowered line read_src
     if [[ "$input" == "-" ]]; then
         printf '%s\n' "stdin"
@@ -429,7 +464,7 @@ boomer_statuscodes_base() {
         fi
         base="$(basename "$input")"
         base="${base%.*}"
-        [[ -z "$base" ]] && base="statuscodes"
+        [[ -z "$base" ]] && base="$fallback"
         printf '%s\n' "$base"
         return 0
     fi
@@ -438,7 +473,11 @@ boomer_statuscodes_base() {
         printf '%s\n' "$BOOMER_APEX"
         return 0
     fi
-    printf '%s\n' "statuscodes"
+    printf '%s\n' "$fallback"
+}
+
+boomer_statuscodes_base() {
+    boomer_scope_base "$1" statuscodes
 }
 
 # Unified status-code sorter. Accepts a URL/host, a host list, an existing
@@ -807,7 +846,7 @@ VirusTotal() {
             fi
             boomer_save_key "$api_key" || return 1
         else
-            echo "[ERROR] no VirusTotal API key saved. Run once: $0 -g <APIKEY>" >&2
+            echo "[ERROR] no VirusTotal API key saved. Run once: $0 --key <APIKEY>" >&2
             return 1
         fi
     fi
@@ -1012,7 +1051,7 @@ AllDomz() {
             if [[ -n "$st_key" ]]; then
                 curl -s --max-time 30 -X GET "https://api.securitytrails.com/v1/domain/$apex/subdomains" -H "Accept: application/json" -H "APIKEY: $st_key" | jq -r --arg d "$apex" '.subdomains[]? + "." + $d' 2>/dev/null >> "$sdom_tmp" &
             else
-                echo "[WARN] no SecurityTrails key saved, skipping that source (run: $0 -g st:<KEY>)" >&2
+                echo "[WARN] no SecurityTrails key saved, skipping that source (run: $0 --key st:<KEY>)" >&2
             fi
         else
             echo "[WARN] jq not found, skipping jq-based subdom sources" >&2
@@ -1065,7 +1104,7 @@ AllDomz() {
         if [[ -n "$vt_sub_key" ]]; then
             curl -s --max-time 60 "https://www.virustotal.com/vtapi/v2/domain/report?apikey=$vt_sub_key&domain=$apex" | jq -r '.subdomains[]?, .domain_siblings[]?' 2>/dev/null | anew "$outdir/SubList7.txt"
         else
-            echo "[WARN] no VirusTotal API key saved, skipping that source (run: $0 -g <APIKEY>)" >&2
+            echo "[WARN] no VirusTotal API key saved, skipping that source (run: $0 --key <APIKEY>)" >&2
         fi
     else
         echo "[WARN] curl/jq not found, skipping VirusTotal source" >&2
@@ -1175,10 +1214,58 @@ TechDetect() {
     fi
 }
 
+# Full-page screenshots via websnap. Writes <base>-screenshots/ with one
+# image per host, using the same naming rules as -a/-c.
+Screenshots() {
+    local input="$1"
+    shift || true
+    local base out
+
+    if [[ -z "$input" ]]; then
+        echo "Usage: $0 -g <url|file> [extra websnap args...]" >&2
+        echo "Example: $0 -g https://example.com" >&2
+        echo "Example: $0 -g subs.txt -c 10" >&2
+        return 1
+    fi
+
+    if ! command -v websnap >/dev/null 2>&1; then
+        echo "[ERROR] websnap not found on PATH" >&2
+        echo "        install: (cd websnap && ./install.sh)" >&2
+        return 1
+    fi
+
+    if [[ -e "$input" && ! -f "$input" ]]; then
+        echo "[ERROR] not a regular file: $input" >&2
+        return 1
+    fi
+    if [[ ! -f "$input" && ( "$input" == /* || "$input" == ./* || "$input" == ../* || "$input" == ~* ) ]]; then
+        echo "[ERROR] file not found: $input" >&2
+        return 1
+    fi
+    if [[ ! -f "$input" && "$input" != */* && "$input" =~ \.(txt|csv|lst|list|json|dic)$ ]]; then
+        echo "[ERROR] file not found: $input (pass a URL to scan a host)" >&2
+        return 1
+    fi
+
+    base="$(boomer_scope_base "$input" screenshots)"
+    out="${base}-screenshots"
+    echo "[INFO] screenshots -> $out"
+    websnap "$input" -o "$out" "$@"
+}
+
 main() {
     local rc=0
     if [[ "${1:-}" == "--help" || "${1:-}" == "-help" ]]; then
         usage 0
+    fi
+    if [[ "${1:-}" == "--key" || "${1:-}" == "-key" ]]; then
+        shift
+        if [[ "${1:-}" == "-h" || "${1:-}" == "--help" || "${1:-}" == "-help" ]]; then
+            command_help key
+            return 0
+        fi
+        boomer_save_key "${1:-}"
+        return $?
     fi
     while getopts ":a:b:c:d:e:f:g:h" opt; do
         case "${OPTARG:-}" in
@@ -1198,7 +1285,7 @@ main() {
             e) VirusTotal "$OPTARG" || rc=$? ;;
             # same verbatim-forwarding as -b.
             f) TechDetect "$OPTARG" "${@:OPTIND}" || rc=$?; break ;;
-            g) boomer_save_key "$OPTARG" || rc=$? ;;
+            g) Screenshots "$OPTARG" "${@:OPTIND}" || rc=$?; break ;;
             h) usage 0 ;;
             *) usage ;;
         esac
