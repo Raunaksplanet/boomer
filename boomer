@@ -156,7 +156,8 @@ usage() {
     -f        HTTPX To Specific Status Code Text File [Simple]
     -g        Alien Url's
     -h        Virus Total
-    -i        TechDetect <url|file> [extra techdetect args...]"
+    -i        TechDetect <url|file> [extra techdetect args...]
+    -s        Save API key  ([-s st:<key>] [-s otx:<key>])"
     exit 1
 }
 
