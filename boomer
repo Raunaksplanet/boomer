@@ -206,47 +206,294 @@ usage() {
     echo "Usage: $0 [options]
     -a        AllDomz
     -b        EndpointFinder <url|file> [extra endpoint-finder args...]
-    -c        Domains to status codes
-    -d        Domains to status codes [Simple]
-    -e        HTTPX To Specific Status Code Text File
-    -f        HTTPX To Specific Status Code Text File [Simple]
+    -c        Status codes: grouped full lines   (alias: -x --full-only --class-only)
+    -d        Status codes: grouped clean URLs   (alias: -x --clean-only --class-only)
+    -e        Status codes: exact full lines     (alias: -x --no-probe --full-only --exact-only)
+    -f        Status codes: exact clean URLs     (alias: -x --clean-only --exact-only)
     -g        Alien Url's
     -h        Virus Total
     -i        TechDetect <url|file> [extra techdetect args...]
-    -s        Save API key  ([-s st:<key>] [-s otx:<key>])"
+    -s        Save API key  ([-s st:<key>] [-s otx:<key>])
+    -x        StatusCodes <url|file|-> [options] (probe/parse, clean+full, class+exact)"
     exit 1
 }
 
-httpx_status_code() {
-    local input_file="$1"
-    if [[ ! -f "$input_file" ]]; then
-        echo "[ERROR] file not found: $input_file" >&2
-        return 1
+# Decide <base>-statuscodes/ for an input: reuse a sibling -subdomains
+# folder name, otherwise the single apex domain, otherwise the file name.
+boomer_statuscodes_base() {
+    local input="$1"
+    local parent base apex lowered line read_src
+    if [[ "$input" == "-" ]]; then
+        printf '%s\n' "stdin"
+        return 0
     fi
-    local status_codes=($(grep -oE '\[[0-9]{3}\]' "$input_file" | sort -u | tr -d '[]'))
-
-    for code in "${status_codes[@]}"; do
-        grep -F "[$code]" "$input_file" > "${code}.txt"
-    done
-
-    echo "Extraction completed."
+    if [[ -f "$input" ]]; then
+        parent="$(basename "$(dirname "$input")")"
+        if [[ "$parent" == *-subdomains ]]; then
+            printf '%s\n' "${parent%-subdomains}"
+            return 0
+        fi
+        read_src="$input"
+        apex=""
+        while IFS= read -r line; do
+            line="${line%$'\r'}"
+            line="${line%%[[:space:]]*}"
+            [[ -z "$line" ]] && continue
+            lowered="$(printf '%s' "$line" | LC_ALL=C tr '[:upper:]' '[:lower:]')"
+            boomer_normalize_domain "$lowered" || continue
+            boomer_is_ipv4 "$BOOMER_NORMALIZED" && continue
+            boomer_apex_domain "$BOOMER_NORMALIZED" || continue
+            if [[ -z "$apex" ]]; then
+                apex="$BOOMER_APEX"
+            elif [[ "$apex" != "$BOOMER_APEX" ]]; then
+                apex=""
+                break
+            fi
+        done < <(head -n 200 "$read_src")
+        if [[ -n "$apex" ]]; then
+            printf '%s\n' "$apex"
+            return 0
+        fi
+        base="$(basename "$input")"
+        base="${base%.*}"
+        [[ -z "$base" ]] && base="statuscodes"
+        printf '%s\n' "$base"
+        return 0
+    fi
+    lowered="$(printf '%s' "$input" | LC_ALL=C tr '[:upper:]' '[:lower:]')"
+    if boomer_normalize_domain "$lowered" && ! boomer_is_ipv4 "$BOOMER_NORMALIZED" && boomer_apex_domain "$BOOMER_NORMALIZED"; then
+        printf '%s\n' "$BOOMER_APEX"
+        return 0
+    fi
+    printf '%s\n' "statuscodes"
 }
 
-httpx_status_code_simple() {
-    local input_file="$1"
-    if [[ ! -f "$input_file" ]]; then
-        echo "[ERROR] file not found: $input_file" >&2
-        return 1
-    fi
-    if ! command -v httpx-toolkit >/dev/null 2>&1; then
-        echo "[ERROR] httpx-toolkit not found on PATH" >&2
-        return 1
-    fi
-    cat "$input_file" | httpx-toolkit -td -sc -nc -silent -title | awk '{print $1, $2}' | while read url status; do
-        status_code=$(echo "$status" | tr -d '[]')
-        echo "$url" >> "${status_code}.txt"
+# Unified status-code sorter. Accepts a URL/host, a host list, an existing
+# httpx output file, or stdin ("-"). Probing vs parsing is auto-detected.
+# Writes <base>-statuscodes/ with clean-* (bare URLs) and full-* (httpx lines),
+# both class buckets (clean-200s.txt) and exact buckets (clean-200.txt).
+StatusSort() {
+    local input="$1"
+    shift || true
+    local outdir_opt="" probe_mode="auto" formats="both" groups="both"
+    local include_failed=0 tech=0 append=0
+    local threads="" timeout="" retries="" rate_limit=""
+    while (( $# > 0 )); do
+        case "$1" in
+            --outdir|--threads|--timeout|--retries|--rate-limit)
+                if (( $# < 2 )); then
+                    echo "[ERROR] $1 requires a value" >&2
+                    return 1
+                fi
+                case "$1" in
+                    --outdir) outdir_opt="$2" ;;
+                    --threads) threads="$2" ;;
+                    --timeout) timeout="$2" ;;
+                    --retries) retries="$2" ;;
+                    --rate-limit) rate_limit="$2" ;;
+                esac
+                shift 2
+                ;;
+            --probe) probe_mode="always"; shift ;;
+            --no-probe|--parse) probe_mode="never"; shift ;;
+            --clean-only) formats="clean"; shift ;;
+            --full-only) formats="full"; shift ;;
+            --class-only) groups="class"; shift ;;
+            --exact-only) groups="exact"; shift ;;
+            --include-failed) include_failed=1; shift ;;
+            --tech) tech=1; shift ;;
+            --append) append=1; shift ;;
+            -h|--help)
+                echo "Usage: $0 -x <url|file|-> [options]"
+                echo "  --probe            force httpx probing"
+                echo "  --no-probe         parse an existing httpx file (no probing)"
+                echo "  --clean-only       bare URLs only"
+                echo "  --full-only        full httpx lines only"
+                echo "  --class-only       100s/200s/300s/400s/500s buckets only"
+                echo "  --exact-only       per-status buckets only"
+                echo "  --include-failed   bucket lines without a status as 000"
+                echo "  --tech             add -td to httpx probing"
+                echo "  --append           keep existing files instead of overwriting"
+                echo "  --outdir DIR       output directory"
+                echo "  --threads N        httpx -threads"
+                echo "  --timeout N        httpx -timeout"
+                echo "  --retries N        httpx -retries"
+                echo "  --rate-limit N     httpx -rl"
+                return 0
+                ;;
+            *)
+                echo "[ERROR] unknown -x option: $1" >&2
+                return 1
+                ;;
+        esac
     done
-    echo "URLs sorted by status codes."
+
+    if [[ -z "$input" ]]; then
+        echo "Usage: $0 -x <url|file|-> [options]" >&2
+        return 1
+    fi
+
+    local tmpdir src="" source_label=""
+    tmpdir="$(mktemp -d "${TMPDIR:-/tmp}/boomer-status.XXXXXX")" || {
+        echo "[ERROR] could not create temporary directory" >&2
+        return 1
+    }
+    cleanup() { rm -rf "$tmpdir"; }
+
+    if [[ "$input" == "-" ]]; then
+        src="$tmpdir/input.txt"
+        cat > "$src"
+        source_label="stdin"
+    elif [[ -f "$input" ]]; then
+        if [[ ! -r "$input" ]]; then
+            echo "[ERROR] file not readable: $input" >&2
+            cleanup
+            return 1
+        fi
+        src="$input"
+        source_label="$input"
+    elif [[ -e "$input" ]]; then
+        echo "[ERROR] not a regular file: $input" >&2
+        cleanup
+        return 1
+    elif [[ "$input" == /* || "$input" == ./* || "$input" == ../* || "$input" == ~* ]]; then
+        echo "[ERROR] file not found: $input" >&2
+        cleanup
+        return 1
+    elif [[ "$input" != */* && "$input" =~ \.(txt|csv|lst|list|json)$ ]]; then
+        echo "[ERROR] file not found: $input (pass a URL to scan a host)" >&2
+        cleanup
+        return 1
+    else
+        src="$tmpdir/input.txt"
+        printf '%s\n' "$input" > "$src"
+        source_label="$input"
+    fi
+
+    if [[ ! -s "$src" ]]; then
+        echo "[ERROR] empty input: $input" >&2
+        cleanup
+        return 1
+    fi
+
+    local mode="$probe_mode" mode_label=""
+    if [[ "$mode" == "auto" ]]; then
+        if grep -qE '\[[0-9]{3}\]' "$src"; then
+            mode="never"
+        else
+            mode="always"
+        fi
+    fi
+
+    if [[ "$mode" == "always" ]]; then
+        if ! command -v httpx-toolkit >/dev/null 2>&1; then
+            echo "[ERROR] httpx-toolkit not found on PATH" >&2
+            cleanup
+            return 1
+        fi
+        local -a args
+        args=(-sc -nc -silent -title)
+        (( tech )) && args+=(-td)
+        [[ -n "$timeout" ]] && args+=(-timeout "$timeout")
+        [[ -n "$retries" ]] && args+=(-retries "$retries")
+        [[ -n "$threads" ]] && args+=(-threads "$threads")
+        [[ -n "$rate_limit" ]] && args+=(-rl "$rate_limit")
+        local probed="$tmpdir/httpx.txt"
+        echo "[INFO] Probing with httpx-toolkit..."
+        if ! httpx-toolkit "${args[@]}" < "$src" > "$probed" 2>/dev/null; then
+            echo "[ERROR] httpx-toolkit failed" >&2
+            cleanup
+            return 1
+        fi
+        src="$probed"
+        mode_label="probed"
+    else
+        mode_label="parsed"
+    fi
+
+    local norm="$tmpdir/records.tsv"
+    : > "$norm"
+    local line url code total=0
+    while IFS= read -r line || [[ -n "$line" ]]; do
+        line="${line%$'\r'}"
+        [[ -z "${line//[[:space:]]/}" ]] && continue
+        url="${line%%[[:space:]]*}"
+        [[ -z "$url" ]] && continue
+        if [[ "$line" =~ \[([0-9]{3})\] ]]; then
+            code="${BASH_REMATCH[1]}"
+        elif (( include_failed )); then
+            code="000"
+        else
+            continue
+        fi
+        printf '%s\t%s\t%s\n' "$url" "$code" "$line" >> "$norm"
+        total=$((total + 1))
+    done < "$src"
+
+    if (( total == 0 )); then
+        echo "[ERROR] no status codes found (is this an httpx file?)" >&2
+        cleanup
+        return 1
+    fi
+
+    local base outdir
+    base="$(boomer_statuscodes_base "$input")"
+    base="${base//[^A-Za-z0-9.-]/_}"
+    [[ -z "$base" ]] && base="statuscodes"
+    outdir="${outdir_opt:-${base}-statuscodes}"
+    if ! mkdir -p "$outdir" 2>/dev/null; then
+        echo "[ERROR] could not create output directory: $outdir" >&2
+        cleanup
+        return 1
+    fi
+    if (( ! append )); then
+        rm -f "$outdir"/clean-*.txt "$outdir"/full-*.txt
+    fi
+    printf '%s\n' "$base" > "$outdir/target.txt" 2>/dev/null || true
+
+    local want_clean=0 want_full=0 want_class=0 want_exact=0
+    [[ "$formats" == "both" || "$formats" == "clean" ]] && want_clean=1
+    [[ "$formats" == "both" || "$formats" == "full" ]] && want_full=1
+    [[ "$groups" == "both" || "$groups" == "class" ]] && want_class=1
+    [[ "$groups" == "both" || "$groups" == "exact" ]] && want_exact=1
+
+    local ln class
+    while IFS=$'\t' read -r url code ln; do
+        class="${code:0:1}00"
+        if (( want_clean )); then
+            printf '%s\n' "$url" >> "$outdir/clean-all.txt"
+            (( want_class )) && printf '%s\n' "$url" >> "$outdir/clean-${class}s.txt"
+            (( want_exact )) && printf '%s\n' "$url" >> "$outdir/clean-${code}.txt"
+        fi
+        if (( want_full )); then
+            printf '%s\n' "$ln" >> "$outdir/full-all.txt"
+            (( want_class )) && printf '%s\n' "$ln" >> "$outdir/full-${class}s.txt"
+            (( want_exact )) && printf '%s\n' "$ln" >> "$outdir/full-${code}.txt"
+        fi
+    done < "$norm"
+
+    local f
+    for f in "$outdir"/clean-*.txt "$outdir"/full-*.txt; do
+        [[ -f "$f" ]] || continue
+        LC_ALL=C sort -u -o "$f" "$f"
+    done
+
+    {
+        echo "target: $base"
+        echo "source: $source_label"
+        echo "mode: $mode_label"
+        echo "total: $total"
+        echo ""
+        echo "status  count"
+        awk -F '\t' '{c[$2]++} END {for (k in c) print k, c[k]}' "$norm" | sort -n | while read -r code count; do
+            printf '%-6s  %s\n' "$code" "$count"
+        done
+    } > "$outdir/summary.txt"
+
+    cleanup
+    echo "[INFO] Classified $total result(s) into $outdir"
+    echo "[INFO] Summary: $outdir/summary.txt"
+    return 0
 }
 
 AlienUrl() {
@@ -752,45 +999,6 @@ EndpointFinder() {
     "$finder" -u "$input" "$@"
 }
 
-CleanDomains() {
-    local domain=$1
-    if [[ ! -f "$domain" ]]; then
-        echo "[ERROR] file not found: $domain" >&2
-        return 1
-    fi
-    if ! command -v httpx-toolkit >/dev/null 2>&1; then
-        echo "[ERROR] httpx-toolkit not found on PATH" >&2
-        return 1
-    fi
-    if ! command -v anew >/dev/null 2>&1; then
-        echo "[ERROR] anew not found on PATH" >&2
-        return 1
-    fi
-    cat "$domain" | httpx-toolkit -td -sc -nc -silent -title | tee >(grep "\[3[0-9][0-9]\]" | anew 300s.txt) >(grep "\[4[0-9][0-9]\]" | anew 400s.txt) >(grep "\[5[0-9][0-9]\]" | anew 500s.txt) | grep "\[2[0-9][0-9]\]" | anew 200s.txt
-}
-
-CleanDomains_Simple() {
-    local input_file="$1"
-    if [[ ! -f "$input_file" ]]; then
-        echo "[ERROR] file not found: $input_file" >&2
-        return 1
-    fi
-    if ! command -v httpx-toolkit >/dev/null 2>&1; then
-        echo "[ERROR] httpx-toolkit not found on PATH" >&2
-        return 1
-    fi
-    if ! command -v anew >/dev/null 2>&1; then
-        echo "[ERROR] anew not found on PATH" >&2
-        return 1
-    fi
-    cat "$input_file" | httpx-toolkit -td -sc -nc -silent -title | awk '{print $1, $2}' | tee \
-        >(grep "\[3[0-9][0-9]\]" | awk '{print $1}' | anew 300s.txt) \
-        >(grep "\[4[0-9][0-9]\]" | awk '{print $1}' | anew 400s.txt) \
-        >(grep "\[5[0-9][0-9]\]" | awk '{print $1}' | anew 500s.txt) \
-        | grep "\[2[0-9][0-9]\]" | awk '{print $1}' | anew 200s.txt
-    echo "URLs categorized by status codes."
-}
-
 TechDetect() {
     local input="$1"
     shift || true
@@ -830,21 +1038,22 @@ TechDetect() {
 
 main() {
     local rc=0
-    while getopts ":a:b:c:d:e:f:g:h:i:s:" opt; do
+    while getopts ":a:b:c:d:e:f:g:h:i:s:x:" opt; do
         case $opt in
             a) AllDomz "$OPTARG" || rc=$? ;;
             # -b consumes the rest of the command line: input + verbatim
             # endpoint-finder args (getopts would otherwise reject them).
             b) EndpointFinder "$OPTARG" "${@:OPTIND}" || rc=$?; break ;;
-            c) CleanDomains "$OPTARG" || rc=$? ;;
-            d) CleanDomains_Simple "$OPTARG" || rc=$? ;;
-            e) httpx_status_code "$OPTARG" || rc=$? ;;
-            f) httpx_status_code_simple "$OPTARG" || rc=$? ;;
+            c) StatusSort "$OPTARG" --probe --full-only --class-only || rc=$? ;;
+            d) StatusSort "$OPTARG" --probe --clean-only --class-only || rc=$? ;;
+            e) StatusSort "$OPTARG" --no-probe --full-only --exact-only || rc=$? ;;
+            f) StatusSort "$OPTARG" --probe --clean-only --exact-only || rc=$? ;;
             g) AlienUrl "$OPTARG" || rc=$? ;;
             h) VirusTotal "$OPTARG" || rc=$? ;;
             # same verbatim-forwarding as -b.
             i) TechDetect "$OPTARG" "${@:OPTIND}" || rc=$?; break ;;
             s) boomer_save_key "$OPTARG" || rc=$? ;;
+            x) StatusSort "$OPTARG" "${@:OPTIND}" || rc=$?; break ;;
             *) usage ;;
         esac
     done
