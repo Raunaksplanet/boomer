@@ -640,12 +640,34 @@ EndpointFinder() {
     fi
 
     if [[ -f "$input" ]]; then
+        if [[ ! -r "$input" ]]; then
+            echo "[ERROR] file not readable: $input" >&2
+            return 1
+        fi
         echo "[INFO] Detected file input: $input"
         "$finder" -i "$input" "$@"
-    else
-        echo "[INFO] Detected URL/host input: $input"
-        "$finder" -u "$input" "$@"
+        return $?
     fi
+
+    if [[ -e "$input" ]]; then
+        echo "[ERROR] not a regular file: $input" >&2
+        return 1
+    fi
+
+    # Missing paths must fail here, not be scanned as a hostname (a missing
+    # "./scope.txt" used to become host "." and write .-urls.txt files).
+    # Schemeless host/path inputs (example.com/page) still go to -u below.
+    if [[ "$input" == /* || "$input" == ./* || "$input" == ../* || "$input" == ~* ]]; then
+        echo "[ERROR] file not found: $input" >&2
+        return 1
+    fi
+    if [[ "$input" != */* && "$input" =~ \.(txt|csv|lst|list|json|dic)$ ]]; then
+        echo "[ERROR] file not found: $input (pass a URL to scan a host)" >&2
+        return 1
+    fi
+
+    echo "[INFO] Detected URL/host input: $input"
+    "$finder" -u "$input" "$@"
 }
 
 CleanDomains() {
