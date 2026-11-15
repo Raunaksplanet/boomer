@@ -325,7 +325,7 @@ StatusSort() {
         return 1
     fi
 
-    local tmpdir src="" source_label=""
+    local tmpdir src=""
     tmpdir="$(mktemp -d "${TMPDIR:-/tmp}/boomer-status.XXXXXX")" || {
         echo "[ERROR] could not create temporary directory" >&2
         return 1
@@ -335,7 +335,6 @@ StatusSort() {
     if [[ "$input" == "-" ]]; then
         src="$tmpdir/input.txt"
         cat > "$src"
-        source_label="stdin"
     elif [[ -f "$input" ]]; then
         if [[ ! -r "$input" ]]; then
             echo "[ERROR] file not readable: $input" >&2
@@ -343,7 +342,6 @@ StatusSort() {
             return 1
         fi
         src="$input"
-        source_label="$input"
     elif [[ -e "$input" ]]; then
         echo "[ERROR] not a regular file: $input" >&2
         cleanup
@@ -359,7 +357,6 @@ StatusSort() {
     else
         src="$tmpdir/input.txt"
         printf '%s\n' "$input" > "$src"
-        source_label="$input"
     fi
 
     if [[ ! -s "$src" ]]; then
@@ -368,7 +365,7 @@ StatusSort() {
         return 1
     fi
 
-    local mode="$probe_mode" mode_label=""
+    local mode="$probe_mode"
     if [[ "$mode" == "auto" ]]; then
         if grep -qE '\[[0-9]{3}\]' "$src"; then
             mode="never"
@@ -398,9 +395,6 @@ StatusSort() {
             return 1
         fi
         src="$probed"
-        mode_label="probed"
-    else
-        mode_label="parsed"
     fi
 
     local norm="$tmpdir/records.tsv"
@@ -438,10 +432,10 @@ StatusSort() {
         cleanup
         return 1
     fi
+    rm -f "$outdir/target.txt" "$outdir/summary.txt"
     if (( ! append )); then
         rm -f "$outdir"/clean-*.txt "$outdir"/full-*.txt
     fi
-    printf '%s\n' "$base" > "$outdir/target.txt" 2>/dev/null || true
 
     local want_clean=0 want_full=0
     [[ "$formats" == "both" || "$formats" == "clean" ]] && want_clean=1
@@ -459,21 +453,8 @@ StatusSort() {
         LC_ALL=C sort -u -o "$f" "$f"
     done
 
-    {
-        echo "target: $base"
-        echo "source: $source_label"
-        echo "mode: $mode_label"
-        echo "total: $total"
-        echo ""
-        echo "status  count"
-        awk -F '\t' '{c[$2]++} END {for (k in c) print k, c[k]}' "$norm" | sort -n | while read -r code count; do
-            printf '%-6s  %s\n' "$code" "$count"
-        done
-    } > "$outdir/summary.txt"
-
     cleanup
     echo "[INFO] Classified $total result(s) into $outdir"
-    echo "[INFO] Summary: $outdir/summary.txt"
     return 0
 }
 
@@ -830,7 +811,7 @@ AllDomz() {
     fi
     echo "[INFO] Target: $apex"
     echo "[INFO] Output directory: $outdir"
-    printf '%s\n' "$apex" > "$outdir/target.txt" 2>/dev/null || true
+    rm -f "$outdir/target.txt"
 
     prune_empty() { [[ -f "$1" ]] && [[ ! -s "$1" ]] && rm -f "$1"; }
     if command -v curl >/dev/null 2>&1; then

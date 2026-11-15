@@ -202,7 +202,6 @@ Each run creates its own folder, so targets never mix:
 
 ```text
 dell.com-subdomains/
-├── target.txt
 ├── SubList1.txt      # crt.name
 ├── SubList2.txt      # subdomain.center / urlscan / myssl / certspotter / netlas / SecurityTrails / hackertarget / rapiddns
 ├── SubList3.txt      # shodan.io scrape
@@ -233,8 +232,6 @@ Each run writes a per-target folder (named after the apex, a sibling
 
 ```text
 example.com-statuscodes/
-├── target.txt
-├── summary.txt
 ├── clean-200.txt        # bare URLs, exact status
 ├── clean-301.txt
 ├── full-200.txt         # original httpx lines, exact status
@@ -246,7 +243,7 @@ example.com-statuscodes/
 - One file pair per status code seen; no grouped `200s`/`300s` files.
 - Files are sorted and de-duplicated; codes with no results get no file.
 - `--append` merges into an existing folder instead of overwriting.
-- `summary.txt` records target, source, mode and per-status counts.
+- Only result data is written: no `target.txt` or `summary.txt` metadata files.
 
 Options:
 
