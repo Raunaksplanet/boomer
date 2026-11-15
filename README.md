@@ -6,25 +6,25 @@ discovery, tech detection and status-code sorting, with no pasted API keys.
 ## Requirements
 
 `boomer` is a bash wrapper: a few commands are required for every feature, and
-the two headless scanners (`-b`, `-i`) are standalone projects that must be
+the two headless scanners (`-b`, `-f`) are standalone projects that must be
 installed separately.
 
 | Tool | Needed by | Required? |
 |---|---|---|
 | `bash` 3.2+ | everything (the script itself) | **yes** |
-| `curl` | `-a -g -h` and the installers | **yes** |
+| `curl` | `-a -d -e` and the installers | **yes** |
 | `git` | `setup.py`, techdetect install | **yes** for setup |
-| `jq` | `-a -g -h` | **yes** for those flags |
+| `jq` | `-a -d -e` | **yes** for those flags |
 | `go` (toolchain) | installs `anew`, `subfinder`, `assetfinder`, `httpx` | **yes** for setup |
 | `node` + `npm` 18+ | `-b` via [endpoint-finder](https://github.com/Raunaksplanet/endpoint-finder) | **yes** for `-b` |
-| `python3` 3.9+ | `-i` via [techdetect](https://github.com/Raunaksplanet/techdetect) | **yes** for `-i` |
+| `python3` 3.9+ | `-f` via [techdetect](https://github.com/Raunaksplanet/techdetect) | **yes** for `-f` |
 | `anew` | `-a` | **yes** for `-a` |
 | `subfinder` | `-a` (optional source) | optional |
 | `assetfinder` | `-a` (optional source) | optional |
 | `subdominator` | `-a` (optional source) | optional, needs Python 3.13+ |
 | `httpx-toolkit` | `-c` (probe mode) | **yes** for `-c` |
 | `endpoint-finder` | `-b` | **yes** for `-b` |
-| `techdetect` | `-i` | **yes** for `-i` |
+| `techdetect` | `-f` | **yes** for `-f` |
 
 ### Per-flag matrix
 
@@ -33,14 +33,14 @@ installed separately.
 | `-a` | AllDomz (subdomains) | `curl`, `anew`; `jq` for 6 sources; optional `subfinder`, `assetfinder`, `subdominator` | optional VT + SecurityTrails |
 | `-b` | EndpointFinder | `endpoint-finder` → Node + Playwright Chromium | — |
 | `-c` | StatusCodes (probe or parse) | `httpx-toolkit` when probing; none when parsing | — |
-| `-g` | AlienVault OTX URLs | `curl`, `jq` | optional OTX |
-| `-h` | VirusTotal undetected URLs | `curl`, `jq` | **required** VT |
-| `-i` | TechDetect | `techdetect` → Python + Playwright Chromium | — |
-| `-s` | Save API key | none | — |
+| `-d` | AlienVault OTX URLs | `curl`, `jq` | optional OTX |
+| `-e` | VirusTotal undetected URLs | `curl`, `jq` | **required** VT |
+| `-f` | TechDetect | `techdetect` → Python + Playwright Chromium | — |
+| `-g` | Save API key | none | — |
 
 ### Headless scanners (separate projects)
 
-`-b` and `-i` delegate to two standalone tools:
+`-b` and `-f` delegate to two standalone tools:
 
 - **[Raunaksplanet/endpoint-finder](https://github.com/Raunaksplanet/endpoint-finder)** — Node.js 18+, `playwright@1.59.0` and a Chromium build.
   ```bash
@@ -55,7 +55,7 @@ installed separately.
 
 Both need a real Chromium download (`python -m playwright install chromium` /
 `npx playwright install chromium`); a bare `pip install playwright` is not
-enough. If Chromium is missing, `-b`/`-i` fail at launch.
+enough. If Chromium is missing, `-b`/`-f` fail at launch.
 
 ## One-command setup
 
@@ -133,12 +133,12 @@ cp boomer /opt/homebrew/bin/boomer   # or /usr/local/bin / ~/.local/bin
 
 ## API keys
 
-All keys are optional except VirusTotal for `-h`. Save once; keys are reused.
+All keys are optional except VirusTotal for `-e`. Save once; keys are reused.
 
 ```bash
-boomer -s <VirusTotal-key>
-boomer -s st:<SecurityTrails-key>
-boomer -s otx:<AlienVault-OTX-key>
+boomer -g <VirusTotal-key>
+boomer -g st:<SecurityTrails-key>
+boomer -g otx:<AlienVault-OTX-key>
 ```
 
 Keys live in `~/.config/boomer/` with `700` directory / `600` file
@@ -157,23 +157,39 @@ Rate limits are tunable: `BOOMER_VT_DELAY`, `BOOMER_VT_BACKOFF`,
 boomer -a <domain|url>                  # subdomains from 14 passive sources
 boomer -b <url|file> [args...]          # endpoint discovery
 boomer -c <url|file|-> [options]        # status codes: probe/parse, full+clean
-boomer -g <domain|file>                 # AlienVault OTX URLs
-boomer -h <domain|file>                 # VirusTotal undetected URLs
-boomer -i <url|file> [args...]          # tech detection
-boomer -s <key>                         # save an API key
+boomer -d <domain|file>                 # AlienVault OTX URLs
+boomer -e <domain|file>                 # VirusTotal undetected URLs
+boomer -f <url|file> [args...]          # tech detection
+boomer -g <key>                         # save an API key
+boomer -h                               # top-level usage
 ```
 
-Extra arguments after `-b`/`-i`/`-c` are forwarded verbatim:
+Extra arguments after `-b`/`-f`/`-c` are forwarded verbatim:
 
 ```bash
 boomer -b https://example.com --scope host --wait 3
-boomer -i example.com --workers 1 --delay 2
+boomer -f example.com --workers 1 --delay 2
 boomer -c subs.txt --timeout 15 --rate-limit 10
 ```
 
 `-a` writes `SubList1..7.txt` (non-empty sources only) and merges them into
-`subs.txt` inside a per-target folder. `-g` appends to `AlienResult.txt`;
-`-h` appends to `VirusTotalResult.txt`.
+`subs.txt` inside a per-target folder. `-d` appends to `AlienResult.txt`;
+`-e` appends to `VirusTotalResult.txt`.
+
+Every command has its own help page:
+
+```bash
+boomer -a -h      # subdomain enumeration
+boomer -b -h      # endpoint discovery
+boomer -c -h      # status-code sorting
+boomer -d -h      # AlienVault OTX URLs
+boomer -e -h      # VirusTotal URLs
+boomer -f -h      # tech detection
+boomer -g -h      # save an API key
+boomer -h         # top-level usage (also: boomer --help)
+```
+
+`-h` on its own prints the top-level usage.
 
 ## Target normalization (`-a`)
 
@@ -306,8 +322,8 @@ current releases, including subdominator 3.x.
   toolchain via winget and puts `boomer` in `%USERPROFILE%\.local\bin`.
 - **PATH:** `setup.py` appends `~/.local/bin`, `$(go env GOPATH)/bin` and npm's
   global bin directory to your shell profile (or the user PATH on Windows).
-- **Fail-fast vs graceful:** only `-b` and `-i` hard-fail when their delegate
-  is missing. `-a` warns and skips unavailable optional sources; `-g` runs
+- **Fail-fast vs graceful:** only `-b` and `-f` hard-fail when their delegate
+  is missing. `-a` warns and skips unavailable optional sources; `-d` runs
   keyless at a slower rate.
 - **Authorized targets only.** You are responsible for staying in scope of
   whatever program you are testing.

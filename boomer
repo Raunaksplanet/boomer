@@ -75,7 +75,7 @@ boomer_save_key() {
     fi
     spec="$(printf '%s' "$spec" | tr -d ' \t\r\n')"
     if [[ -z "$spec" ]]; then
-        echo "Usage: $0 -s <VirusTotal-API-key>  (or  $0 -s st:<SecurityTrails-key> | otx:<OTX-key>)" >&2
+        echo "Usage: $0 -g <VirusTotal-API-key>  (or  $0 -g st:<SecurityTrails-key> | otx:<OTX-key>)" >&2
         return 1
     fi
     if ! boomer_config_dir; then
@@ -203,15 +203,192 @@ boomer_load_targets() {
 }
 
 usage() {
+    local rc="${1:-1}"
     echo "Usage: $0 [options]
     -a        AllDomz
     -b        EndpointFinder <url|file> [extra endpoint-finder args...]
     -c        StatusCodes <url|file|-> [options]
-    -g        Alien Url's
-    -h        Virus Total
-    -i        TechDetect <url|file> [extra techdetect args...]
-    -s        Save API key  ([-s st:<key>] [-s otx:<key>])"
-    exit 1
+    -d        Alien Url's
+    -e        Virus Total
+    -f        TechDetect <url|file> [extra techdetect args...]
+    -g        Save API key  ([-g st:<key>] [-g otx:<key>])"
+    exit "$rc"
+}
+
+# Detailed per-command help. Invoked by: boomer -<flag> -h
+command_help() {
+    case "$1" in
+        a)
+            cat <<'EOF'
+boomer -a — subdomain enumeration
+
+Usage:
+  boomer -a <domain|url>
+
+Accepts a domain, subdomain, full URL or *. wildcard and reduces it to the
+registrable domain (eTLD+1) before querying any source:
+  https://www.dell.com/en-in   ->  dell.com
+  foo.bar.example.co.uk        ->  example.co.uk
+Unknown TLDs and IP addresses are rejected.
+
+Output:
+  <apex>-subdomains/
+    SubList1.txt   crt.name
+    SubList2.txt   subdomain.center, urlscan.io, myssl, certspotter,
+                   netlas, SecurityTrails, hackertarget, rapiddns
+    SubList3.txt   shodan.io
+    SubList4.txt   subfinder
+    SubList5.txt   assetfinder
+    SubList6.txt   subdominator
+    SubList7.txt   VirusTotal
+    subs.txt       merged and de-duplicated
+  Sources that return nothing leave no file behind.
+
+Requires:
+  curl, anew; jq for the jq-based sources
+  optional: subfinder, assetfinder, subdominator
+  optional keys: boomer -g st:<key>, boomer -g <VirusTotal-key>
+
+Examples:
+  boomer -a example.com
+  boomer -a https://www.dell.com/en-in
+EOF
+            ;;
+        b)
+            cat <<'EOF'
+boomer -b — endpoint discovery
+
+Usage:
+  boomer -b <url|file> [endpoint-finder args...]
+
+Delegates to Raunaksplanet/endpoint-finder. Everything after the input is
+forwarded verbatim, so endpoint-finder's own options work unchanged.
+
+Requires:
+  endpoint-finder (Node.js 18+) and Playwright Chromium
+
+Examples:
+  boomer -b https://example.com
+  boomer -b urls.txt --scope host --wait 3
+EOF
+            ;;
+        c)
+            cat <<'EOF'
+boomer -c — status-code sorting
+
+Usage:
+  boomer -c <url|file|-> [options]
+
+Accepts a URL, host list, existing httpx output file, or stdin ("-"). If the
+input already contains [NNN] status codes it is parsed; otherwise the hosts
+are probed with httpx-toolkit.
+
+Output:
+  <base>-statuscodes/
+    clean-<code>.txt   bare URLs for that exact status
+    full-<code>.txt    full httpx lines (title/tech included)
+
+Options:
+  --probe              force httpx probing
+  --no-probe, --parse  parse an existing httpx file (no probing)
+  --clean-only         bare URLs only
+  --full-only          full httpx lines only
+  --include-failed     bucket status-less lines as 000
+  --tech               add -td (tech detection) to httpx
+  --append             keep existing files and merge new results
+  --outdir DIR         override <base>-statuscodes/
+  --threads N          httpx -threads
+  --timeout N          httpx -timeout
+  --retries N          httpx -retries
+  --rate-limit N       httpx -rl
+
+Requires:
+  httpx-toolkit (probe mode only)
+
+Examples:
+  boomer -c subs.txt
+  boomer -c httpx-output.txt --no-probe
+  boomer -c subs.txt --threads 100 --timeout 10
+EOF
+            ;;
+        d)
+            cat <<'EOF'
+boomer -d — AlienVault OTX URLs
+
+Usage:
+  boomer -d <domain|url|file>
+
+Pulls known URLs for the target from AlienVault OTX and appends them to
+AlienResult.txt. Uses an OTX key if saved; without a key it still runs, at a
+slower rate.
+
+Requires:
+  curl, jq
+  optional key: boomer -g otx:<key>
+
+Examples:
+  boomer -d example.com
+  boomer -d domains.txt
+EOF
+            ;;
+        e)
+            cat <<'EOF'
+boomer -e — VirusTotal URLs
+
+Usage:
+  boomer -e <domain|url|file>
+
+Looks up the target in VirusTotal and appends URLs that VirusTotal has not
+flagged to VirusTotalResult.txt.
+
+Requires:
+  curl, jq and a VirusTotal API key (boomer -g <key>)
+
+Examples:
+  boomer -e example.com
+  boomer -e domains.txt
+EOF
+            ;;
+        f)
+            cat <<'EOF'
+boomer -f — tech detection
+
+Usage:
+  boomer -f <url|file> [techdetect args...]
+
+Delegates to Raunaksplanet/techdetect. Arguments after the input are
+forwarded verbatim.
+
+Requires:
+  techdetect (Python 3.9+) and Playwright Chromium
+
+Examples:
+  boomer -f example.com
+  boomer -f urls.txt --workers 1 --delay 2
+EOF
+            ;;
+        g)
+            cat <<'EOF'
+boomer -g — save an API key
+
+Usage:
+  boomer -g <VirusTotal-key>
+  boomer -g st:<SecurityTrails-key>
+  boomer -g otx:<AlienVault-OTX-key>
+
+Stores keys in ~/.config/boomer/ with 700 directory / 600 file permissions.
+Saved keys are reused automatically by -a, -d and -e.
+
+Examples:
+  boomer -g 0123456789abcdef
+  boomer -g st:xxxxxxxxxxxx
+  boomer -g otx:xxxxxxxxxxxx
+EOF
+            ;;
+        *)
+            usage
+            ;;
+    esac
 }
 
 # Decide <base>-statuscodes/ for an input: reuse a sibling -subdomains
@@ -461,7 +638,7 @@ StatusSort() {
 AlienUrl() {
     local input=$1
     if [[ -z "$input" ]]; then
-        echo "Usage: $0 -g <domain|url|file>" >&2
+        echo "Usage: $0 -d <domain|url|file>" >&2
         return 1
     fi
     if ! command -v jq >/dev/null 2>&1; then
@@ -607,7 +784,7 @@ VirusTotal() {
     local api_key
 
     if [[ -z "$input" ]]; then
-        echo "Usage: $0 -h <domain|url|file>" >&2
+        echo "Usage: $0 -e <domain|url|file>" >&2
         return 1
     fi
     if ! command -v jq >/dev/null 2>&1; then
@@ -630,7 +807,7 @@ VirusTotal() {
             fi
             boomer_save_key "$api_key" || return 1
         else
-            echo "[ERROR] no VirusTotal API key saved. Run once: $0 -s <APIKEY>" >&2
+            echo "[ERROR] no VirusTotal API key saved. Run once: $0 -g <APIKEY>" >&2
             return 1
         fi
     fi
@@ -835,7 +1012,7 @@ AllDomz() {
             if [[ -n "$st_key" ]]; then
                 curl -s --max-time 30 -X GET "https://api.securitytrails.com/v1/domain/$apex/subdomains" -H "Accept: application/json" -H "APIKEY: $st_key" | jq -r --arg d "$apex" '.subdomains[]? + "." + $d' 2>/dev/null >> "$sdom_tmp" &
             else
-                echo "[WARN] no SecurityTrails key saved, skipping that source (run: $0 -s st:<KEY>)" >&2
+                echo "[WARN] no SecurityTrails key saved, skipping that source (run: $0 -g st:<KEY>)" >&2
             fi
         else
             echo "[WARN] jq not found, skipping jq-based subdom sources" >&2
@@ -888,7 +1065,7 @@ AllDomz() {
         if [[ -n "$vt_sub_key" ]]; then
             curl -s --max-time 60 "https://www.virustotal.com/vtapi/v2/domain/report?apikey=$vt_sub_key&domain=$apex" | jq -r '.subdomains[]?, .domain_siblings[]?' 2>/dev/null | anew "$outdir/SubList7.txt"
         else
-            echo "[WARN] no VirusTotal API key saved, skipping that source (run: $0 -s <APIKEY>)" >&2
+            echo "[WARN] no VirusTotal API key saved, skipping that source (run: $0 -g <APIKEY>)" >&2
         fi
     else
         echo "[WARN] curl/jq not found, skipping VirusTotal source" >&2
@@ -968,7 +1145,7 @@ TechDetect() {
     local out=""
 
     if [[ -z "$input" ]]; then
-        echo "Usage: $0 -i <url|file> [extra techdetect args...]" >&2
+        echo "Usage: $0 -f <url|file> [extra techdetect args...]" >&2
         return 1
     fi
 
@@ -1000,7 +1177,16 @@ TechDetect() {
 
 main() {
     local rc=0
-    while getopts ":a:b:c:g:h:i:s:" opt; do
+    if [[ "${1:-}" == "--help" || "${1:-}" == "-help" ]]; then
+        usage 0
+    fi
+    while getopts ":a:b:c:d:e:f:g:h" opt; do
+        case "${OPTARG:-}" in
+            -h|--help|-help)
+                command_help "$opt"
+                return 0
+                ;;
+        esac
         case $opt in
             a) AllDomz "$OPTARG" || rc=$? ;;
             # -b consumes the rest of the command line: input + verbatim
@@ -1008,11 +1194,12 @@ main() {
             b) EndpointFinder "$OPTARG" "${@:OPTIND}" || rc=$?; break ;;
             # -c also forwards its trailing --options to StatusSort.
             c) StatusSort "$OPTARG" "${@:OPTIND}" || rc=$?; break ;;
-            g) AlienUrl "$OPTARG" || rc=$? ;;
-            h) VirusTotal "$OPTARG" || rc=$? ;;
+            d) AlienUrl "$OPTARG" || rc=$? ;;
+            e) VirusTotal "$OPTARG" || rc=$? ;;
             # same verbatim-forwarding as -b.
-            i) TechDetect "$OPTARG" "${@:OPTIND}" || rc=$?; break ;;
-            s) boomer_save_key "$OPTARG" || rc=$? ;;
+            f) TechDetect "$OPTARG" "${@:OPTIND}" || rc=$?; break ;;
+            g) boomer_save_key "$OPTARG" || rc=$? ;;
+            h) usage 0 ;;
             *) usage ;;
         esac
     done
