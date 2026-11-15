@@ -1,139 +1,136 @@
 # boomer
 
-Fast subdomain enumeration and recon in pure bash — passive sources, endpoint
-discovery, tech detection and status-code sorting, with no pasted API keys.
+Subdomain enumeration and recon in pure bash: passive subdomain sources,
+endpoint discovery, tech detection and status-code sorting.
 
-## Requirements
+## Contents
 
-`boomer` is a bash wrapper: a few commands are required for every feature, and
-the two headless scanners (`-b`, `-f`) are standalone projects that must be
-installed separately.
+| Section | What you'll find |
+|---|---|
+| [Quick start](#quick-start) | Clone, install, run |
+| [Installation](#installation) | Automated setup, manual setup, Windows |
+| [Tools required](#tools-required) | What each flag needs |
+| [Usage](#usage) | Flags, examples, per-command help |
+| [API keys](#api-keys) | Save keys once, reuse them |
+| [Output](#output) | Folder layouts for `-a` and `-c` |
+| [Updating](#updating) | Upgrade boomer's tools |
+| [Notes](#notes) | Troubleshooting and scope |
 
-| Tool | Needed by | Required? |
-|---|---|---|
-| `bash` 3.2+ | everything (the script itself) | **yes** |
-| `curl` | `-a -d -e` and the installers | **yes** |
-| `git` | `setup.py`, techdetect install | **yes** for setup |
-| `jq` | `-a -d -e` | **yes** for those flags |
-| `go` (toolchain) | installs `anew`, `subfinder`, `assetfinder`, `httpx` | **yes** for setup |
-| `node` + `npm` 18+ | `-b` via [endpoint-finder](https://github.com/Raunaksplanet/endpoint-finder) | **yes** for `-b` |
-| `python3` 3.9+ | `-f` via [techdetect](https://github.com/Raunaksplanet/techdetect) | **yes** for `-f` |
-| `anew` | `-a` | **yes** for `-a` |
-| `subfinder` | `-a` (optional source) | optional |
-| `assetfinder` | `-a` (optional source) | optional |
-| `subdominator` | `-a` (optional source) | optional, needs Python 3.13+ |
-| `httpx-toolkit` | `-c` (probe mode) | **yes** for `-c` |
-| `endpoint-finder` | `-b` | **yes** for `-b` |
-| `techdetect` | `-f` | **yes** for `-f` |
-
-### Per-flag matrix
-
-| Flag | Feature | External binaries | API key |
-|---|---|---|---|
-| `-a` | AllDomz (subdomains) | `curl`, `anew`; `jq` for 6 sources; optional `subfinder`, `assetfinder`, `subdominator` | optional VT + SecurityTrails |
-| `-b` | EndpointFinder | `endpoint-finder` → Node + Playwright Chromium | — |
-| `-c` | StatusCodes (probe or parse) | `httpx-toolkit` when probing; none when parsing | — |
-| `-d` | AlienVault OTX URLs | `curl`, `jq` | optional OTX |
-| `-e` | VirusTotal undetected URLs | `curl`, `jq` | **required** VT |
-| `-f` | TechDetect | `techdetect` → Python + Playwright Chromium | — |
-| `-g` | Save API key | none | — |
-
-### Headless scanners (separate projects)
-
-`-b` and `-f` delegate to two standalone tools:
-
-- **[Raunaksplanet/endpoint-finder](https://github.com/Raunaksplanet/endpoint-finder)** — Node.js 18+, `playwright@1.59.0` and a Chromium build.
-  ```bash
-  npm install -g endpoint-finder
-  npx playwright install chromium
-  ```
-- **[Raunaksplanet/techdetect](https://github.com/Raunaksplanet/techdetect)** — Python 3.9+, `playwright` + `httpx`, and a Chromium build.
-  ```bash
-  git clone https://github.com/Raunaksplanet/techdetect
-  cd techdetect && python3 install.py
-  ```
-
-Both need a real Chromium download (`python -m playwright install chromium` /
-`npx playwright install chromium`); a bare `pip install playwright` is not
-enough. If Chromium is missing, `-b`/`-f` fail at launch.
-
-## One-command setup
-
-`setup.py` installs **everything above** end-to-end on Windows, macOS and
-Linux: base tools, Go scanners, `httpx-toolkit`, `subdominator`,
-`endpoint-finder` + Chromium, `techdetect` + Chromium, and `boomer` itself on
-PATH. New installs use the current upstream releases; `--force` upgrades tools
-that are already present.
+## Quick start
 
 ```bash
-sudo python3 setup.py --setup     # macOS / Linux (recommended)
-python  setup.py --setup          # Windows (no sudo needed)
+git clone https://github.com/Raunaksplanet/boomer
+cd boomer
+sudo python3 setup.py --setup     # macOS / Linux
+boomer -h
 ```
 
-Helpful flags:
+Windows: run `python setup.py --setup` (no `sudo`) and use **Git Bash** or **WSL**.
 
-```bash
-python3 setup.py --help           # show every option
-python3 setup.py --check          # report what is installed, change nothing
-sudo python3 setup.py --setup --force          # upgrade/reinstall everything
-sudo python3 setup.py --setup --skip-browsers  # skip Chromium downloads
-sudo python3 setup.py --setup --prefix ~/.local/bin
-sudo python3 setup.py --setup --dry-run -v     # show commands, do nothing
-```
+## Installation
 
-`setup.py` is idempotent — tools already on PATH are left alone — and it drops
-privileges to `$SUDO_USER` for Homebrew/npm/pip/Go so nothing is written as
-root-owned. When run without `sudo`, system packages use `sudo` as needed.
+`setup.py` installs everything: base tools, the Go scanners, `httpx-toolkit`,
+`subdominator`, both headless scanners plus Chromium, and `boomer` itself on
+PATH. It is safe to re-run; existing tools are left alone unless you pass
+`--force`.
 
-Per-OS notes:
+| Command | What it does |
+|---|---|
+| `sudo python3 setup.py --setup` | Install or repair everything (macOS / Linux) |
+| `python setup.py --setup` | Same, on Windows |
+| `python3 setup.py --check` | Report what is installed, change nothing |
+| `sudo python3 setup.py --setup --force` | Upgrade everything in place |
+| `sudo python3 setup.py --setup --skip-browsers` | Skip the Chromium downloads |
+| `sudo python3 setup.py --setup --prefix ~/.local/bin` | Choose where `boomer` goes |
+| `python3 setup.py --setup --dry-run -v` | Show commands without running them |
 
-| OS | Command | Notes |
-|---|---|---|
-| macOS | `sudo python3 setup.py --setup` | Uses Homebrew (installs it if missing). |
-| Linux | `sudo python3 setup.py --setup` | Uses apt / dnf / yum / pacman / zypper / apk. |
-| Windows | `python setup.py --setup` | Uses winget (choco as fallback). Run `boomer` from **Git Bash** or **WSL** — it is a bash script. |
+Open a new terminal afterwards so PATH changes apply, then run `boomer -h`.
 
-After setup, open a new terminal (or re-source your shell rc) so the PATH
-changes apply, then verify:
-
-```bash
-boomer --help
-python3 setup.py --check
-```
-
-## Manual setup
-
-If you prefer to install things yourself:
+<details>
+<summary><strong>Manual setup</strong></summary>
 
 ```bash
 # base (macOS)
 brew install jq anew go node
+
+# Go scanners
 go install github.com/tomnomnom/anew@latest
 go install github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest
 go install github.com/tomnomnom/assetfinder@latest
 go install github.com/projectdiscovery/httpx/cmd/httpx@latest
 ln -sf "$(go env GOPATH)/bin/httpx" "$(go env GOPATH)/bin/httpx-toolkit"
 
-# subdominator (Python 3.13+)
+# subdominator (needs Python 3.13+)
 pipx install --python python3.13 subdominator
-pipx upgrade subdominator        # upgrade an existing install
 
 # headless scanners
 npm install -g endpoint-finder && npx playwright install chromium
-git clone https://github.com/Raunaksplanet/techdetect && (cd techdetect && python3 install.py)
+git clone https://github.com/Raunaksplanet/techdetect
+(cd techdetect && python3 install.py)
 
 # boomer
 chmod +x boomer
-cp boomer /opt/homebrew/bin/boomer   # or /usr/local/bin / ~/.local/bin
+cp boomer /opt/homebrew/bin/boomer   # or /usr/local/bin, ~/.local/bin
 ```
 
 > **Why `httpx-toolkit`?** boomer calls ProjectDiscovery's `httpx` by that name
 > so it never collides with the Python `httpx` module. `setup.py` creates the
 > alias automatically.
 
+</details>
+
+## Tools required
+
+| Tool | Used by | Notes |
+|---|---|---|
+| `bash` 3.2+ | everything | The script itself |
+| `curl`, `jq` | `-a`, `-d`, `-e` | Required for those flags |
+| `anew` | `-a` | Merges and de-duplicates results |
+| `httpx-toolkit` | `-c` | Only when probing (parsing needs nothing) |
+| `subfinder`, `assetfinder`, `subdominator` | `-a` | Optional extra sources (subdominator needs Python 3.13+) |
+| [endpoint-finder](https://github.com/Raunaksplanet/endpoint-finder) | `-b` | Node 18+ and Playwright Chromium |
+| [techdetect](https://github.com/Raunaksplanet/techdetect) | `-f` | Python 3.9+ and Playwright Chromium |
+
+A bare `pip install playwright` is not enough — both scanners need a real
+Chromium download (`npx playwright install chromium`). `setup.py` does this for
+you.
+
+## Usage
+
+| Flag | Feature | Example |
+|---|---|---|
+| `-a` | Subdomains from 14 passive sources | `boomer -a example.com` |
+| `-b` | Endpoint discovery | `boomer -b https://example.com` |
+| `-c` | Status-code sorting (probe or parse) | `boomer -c subs.txt` |
+| `-d` | AlienVault OTX URLs | `boomer -d example.com` |
+| `-e` | VirusTotal undetected URLs | `boomer -e example.com` |
+| `-f` | Tech detection | `boomer -f example.com` |
+| `-g` | Save an API key | `boomer -g <VirusTotal-key>` |
+| `-h` | Top-level usage | `boomer -h` |
+
+Arguments after `-b`, `-c` and `-f` are passed straight to the underlying tool:
+
+```bash
+boomer -b https://example.com --scope host --wait 3
+boomer -c subs.txt --threads 100 --timeout 10
+boomer -f example.com --workers 1 --delay 2
+```
+
+Every command has its own help page, e.g. `boomer -a -h`, `boomer -c -h`.
+
+`-a` accepts a domain, subdomain, URL or `*.` wildcard and reduces it to the
+registrable domain first:
+
+```bash
+boomer -a https://www.dell.com/en-in   # -> dell.com
+boomer -a foo.bar.example.co.uk        # -> example.co.uk
+boomer -a 192.168.1.1                  # rejected: IP address
+```
+
 ## API keys
 
-All keys are optional except VirusTotal for `-e`. Save once; keys are reused.
+Only `-e` (VirusTotal) needs a key; the others are optional. Save once and
+boomer reuses them:
 
 ```bash
 boomer -g <VirusTotal-key>
@@ -141,195 +138,79 @@ boomer -g st:<SecurityTrails-key>
 boomer -g otx:<AlienVault-OTX-key>
 ```
 
-Keys live in `~/.config/boomer/` with `700` directory / `600` file
-permissions. Environment overrides: `BOOMER_VT_API_KEY`,
-`BOOMER_SECURITYTRAILS_KEY`, `BOOMER_OTX_API_KEY`.
+Keys live in `~/.config/boomer/` (700 directory, 600 files). Environment
+overrides: `BOOMER_VT_API_KEY`, `BOOMER_SECURITYTRAILS_KEY`,
+`BOOMER_OTX_API_KEY`. No keys are built into the source.
 
-> The public source ships **no** built-in keys. If you previously ran a build
-> with embedded keys, rotate them.
+## Output
 
-Rate limits are tunable: `BOOMER_VT_DELAY`, `BOOMER_VT_BACKOFF`,
-`BOOMER_VT_RETRIES`, `BOOMER_OTX_DELAY`, `BOOMER_OTX_BACKOFF`.
-
-## Usage
-
-```bash
-boomer -a <domain|url>                  # subdomains from 14 passive sources
-boomer -b <url|file> [args...]          # endpoint discovery
-boomer -c <url|file|-> [options]        # status codes: probe/parse, full+clean
-boomer -d <domain|file>                 # AlienVault OTX URLs
-boomer -e <domain|file>                 # VirusTotal undetected URLs
-boomer -f <url|file> [args...]          # tech detection
-boomer -g <key>                         # save an API key
-boomer -h                               # top-level usage
-```
-
-Extra arguments after `-b`/`-f`/`-c` are forwarded verbatim:
-
-```bash
-boomer -b https://example.com --scope host --wait 3
-boomer -f example.com --workers 1 --delay 2
-boomer -c subs.txt --timeout 15 --rate-limit 10
-```
-
-`-a` writes `SubList1..7.txt` (non-empty sources only) and merges them into
-`subs.txt` inside a per-target folder. `-d` appends to `AlienResult.txt`;
-`-e` appends to `VirusTotalResult.txt`.
-
-Every command has its own help page:
-
-```bash
-boomer -a -h      # subdomain enumeration
-boomer -b -h      # endpoint discovery
-boomer -c -h      # status-code sorting
-boomer -d -h      # AlienVault OTX URLs
-boomer -e -h      # VirusTotal URLs
-boomer -f -h      # tech detection
-boomer -g -h      # save an API key
-boomer -h         # top-level usage (also: boomer --help)
-```
-
-`-h` on its own prints the top-level usage.
-
-## Target normalization (`-a`)
-
-`-a` accepts almost anything and reduces it to the **registrable domain** before
-touching any source:
-
-```bash
-boomer -a https://www.dell.com/en-in?utm=1   # -> dell.com
-boomer -a WWW.DELL.COM.                      # -> dell.com
-boomer -a dell.com:443                       # -> dell.com
-boomer -a foo.bar.example.co.uk              # -> example.co.uk
-boomer -a "*.example.com"                    # -> example.com
-boomer -a random.raunak                      # rejected: unknown public suffix
-boomer -a 192.168.1.1                        # rejected: IP address
-```
-
-- Schemes, `user:pass@`, ports, paths, queries, fragments, trailing dots and
-  `*.` wildcards are stripped.
-- Multi-label public suffixes are handled (`co.uk`, `com.au`, `com.br`,
-  `com.tr`, …), so the registrable domain is correct instead of just the last
-  two labels.
-- The TLD must be a known gTLD, a two-letter ccTLD, or a punycode (`xn--`) IDN;
-  otherwise the input is rejected before any request is made.
-- The apex is used for **every** source (subfinder, assetfinder, subdominator,
-  VirusTotal included), not the raw input.
-
-Each run creates its own folder, so targets never mix:
+`-a` writes one folder per target; empty sources leave no file:
 
 ```text
 dell.com-subdomains/
-├── SubList1.txt      # crt.name
-├── SubList2.txt      # subdomain.center / urlscan / myssl / certspotter / netlas / SecurityTrails / hackertarget / rapiddns
-├── SubList3.txt      # shodan.io scrape
-├── SubList4.txt      # subfinder
-├── SubList5.txt      # assetfinder
-├── SubList6.txt      # subdominator
-├── SubList7.txt      # VirusTotal
-└── subs.txt          # merged, de-duplicated
+├── SubList1.txt … SubList7.txt   # one file per source
+└── subs.txt                     # merged, de-duplicated
 ```
 
-Empty sources leave no files behind and are skipped in the final `subs.txt`.
-
-## Status code sorting (`-c`)
-
-One command for status-code sorting. Give it a URL, a host list, an existing
-httpx output file, or stdin (`-`); it decides automatically whether to probe:
-
-```bash
-boomer -c subs.txt                 # host list  -> httpx probe
-boomer -c httpx-output.txt         # has [NNN]  -> parse, no probe
-boomer -c https://example.com      # single URL -> probe
-cat subs.txt | boomer -c -         # stdin      -> probe
-```
-
-Each run writes a per-target folder (named after the apex, a sibling
-`-subdomains` folder, or the input file):
+`-c` writes one file pair per status code, sorted and de-duplicated:
 
 ```text
 example.com-statuscodes/
-├── clean-200.txt        # bare URLs, exact status
+├── clean-200.txt   # bare URLs
 ├── clean-301.txt
-├── full-200.txt         # original httpx lines, exact status
+├── full-200.txt    # full httpx lines
 └── full-301.txt
 ```
 
-- `full-<code>.txt` = original httpx lines incl. title/tech.
-- `clean-<code>.txt` = bare URLs only.
-- One file pair per status code seen; no grouped `200s`/`300s` files.
-- Files are sorted and de-duplicated; codes with no results get no file.
-- `--append` merges into an existing folder instead of overwriting.
-- Only result data is written: no `target.txt` or `summary.txt` metadata files.
+`-d` appends to `AlienResult.txt`; `-e` appends to `VirusTotalResult.txt`.
+Folders contain result data only — no metadata files.
 
-Options:
+### `-c` options
 
 | Option | Effect |
 |---|---|
-| `--probe` / `--no-probe` | force probing or force parsing |
-| `--clean-only` / `--full-only` | only bare URLs / only full lines |
-| `--include-failed` | bucket status-less lines as `000` |
-| `--tech` | add `-td` to the httpx probe |
-| `--append` | keep existing files, merge new results |
-| `--outdir DIR` | override `<base>-statuscodes/` |
+| `--probe` / `--no-probe` | Force probing or force parsing |
+| `--clean-only` / `--full-only` | Only bare URLs / only full lines |
+| `--include-failed` | Bucket status-less lines as `000` |
+| `--tech` | Add `-td` to the httpx probe |
+| `--append` | Merge into existing files instead of overwriting |
+| `--outdir DIR` | Override `<base>-statuscodes/` |
 | `--threads N` `--timeout N` `--retries N` `--rate-limit N` | httpx tuning |
 
-## Sources (`-a`)
-
-14 providers: crt.name, subdomain.center, urlscan.io, myssl, certspotter,
-netlas, SecurityTrails, hackertarget, rapiddns, shodan.io scrape, subfinder,
-assetfinder, subdominator, VirusTotal.
-
-## Updating tools
-
-`-a` benefits from current releases of its scanners. Upgrade everything in one
-shot:
+## Updating
 
 ```bash
 sudo python3 setup.py --setup --force
 ```
 
-Or update the individual tools:
+<details>
+<summary><strong>Update tools individually</strong></summary>
 
 ```bash
-# Go scanners
 go install github.com/tomnomnom/anew@latest
 go install github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest
 go install github.com/tomnomnom/assetfinder@latest
 go install github.com/projectdiscovery/httpx/cmd/httpx@latest
-
-# subdominator (Python 3.13+)
-pipx upgrade subdominator
-
-# headless scanners
+pipx upgrade subdominator            # Python 3.13+
 npm install -g endpoint-finder@latest && npx playwright install chromium
 git -C techdetect pull && (cd techdetect && python3 install.py)
 ```
 
-If `pipx upgrade subdominator` fails, reinstall it with a suitable interpreter:
+If `pipx upgrade subdominator` fails, reinstall it:
+`pipx install --force --python python3.13 subdominator`.
 
-```bash
-pipx install --force --python python3.13 subdominator
-```
-
-Check the installed versions with `subfinder -version`, `httpx-toolkit
--version` and `subdominator -v`. boomer's `-a` and `-c` calls are tested against
-current releases, including subdominator 3.x.
+</details>
 
 ## Notes
 
-- **Windows:** run boomer under Git Bash or WSL. `setup.py` installs the Windows
-  toolchain via winget and puts `boomer` in `%USERPROFILE%\.local\bin`.
-- **PATH:** `setup.py` appends `~/.local/bin`, `$(go env GOPATH)/bin` and npm's
-  global bin directory to your shell profile (or the user PATH on Windows).
-- **Fail-fast vs graceful:** only `-b` and `-f` hard-fail when their delegate
-  is missing. `-a` warns and skips unavailable optional sources; `-d` runs
-  keyless at a slower rate.
-- **Authorized targets only.** You are responsible for staying in scope of
-  whatever program you are testing.
+- **PATH:** `setup.py` adds `~/.local/bin`, the Go bin directory and npm's
+  global bin to your shell profile.
+- **Missing tools:** only `-b` and `-f` hard-fail. `-a` warns and skips
+  unavailable sources; `-d` runs keyless at a slower rate.
+- **Authorized targets only.** Stay in scope of whatever program you test.
 
 ## Links
 
-- boomer — https://github.com/Raunaksplanet/boomer
-- endpoint-finder — https://github.com/Raunaksplanet/endpoint-finder
-- techdetect — https://github.com/Raunaksplanet/techdetect
+- [boomer](https://github.com/Raunaksplanet/boomer)
+- [endpoint-finder](https://github.com/Raunaksplanet/endpoint-finder)
+- [techdetect](https://github.com/Raunaksplanet/techdetect)
